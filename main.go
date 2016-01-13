@@ -1,7 +1,28 @@
 package main
 
-import "fmt"
+import (
+    "bufio"
+    "fmt"
+    "net"
+)
 
 func main() {
-    fmt.Printf("hello, file store!\n")
+    ln, err := net.Listen("tcp", ":8080")
+    if err != nil {
+        return
+    }
+    conn, err := ln.Accept()
+    if err != nil {
+        return
+    }
+    rstream := bufio.NewReader(conn)
+    for {
+        p := ParseRequest(rstream)
+        if p != nil {
+            fmt.Println("Yay!")
+        } else {
+            fmt.Println("No!")
+            break
+        }
+    }
 }
