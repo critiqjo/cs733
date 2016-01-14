@@ -7,25 +7,35 @@ import (
     "net"
 )
 
+func handleClient(conn net.Conn) {
+    rstream := bufio.NewReader(conn)
+    wstream := bufio.NewWriter(conn)
+    defer conn.Close()
+    for {
+        r, e := ParseRequest(rstream)
+        if r != nil {
+            _, e = wstream.WriteString("OK\r\n")
+        } else if e != io.EOF {
+            _, e = wstream.WriteString("ERR_CMD_ERR\r\n")
+        } else { break }
+        if e != nil { break }
+        wstream.Flush()
+    }
+}
+
 func main() {
     ln, err := net.Listen("tcp", ":8080")
     if err != nil {
         return
     }
-    conn, err := ln.Accept()
-    if err != nil {
-        return
-    }
-    rstream := bufio.NewReader(conn)
+
+    fmt.Println("Waiting for clients!")
     for {
-        p, e := ParseRequest(rstream)
-        if p != nil {
-            fmt.Println("Yay!")
-        } else {
-            fmt.Println("No!")
-            if e == io.EOF {
-                break
-            }
+        conn, err := ln.Accept()
+        if err != nil {
+            fmt.Println(err)
+            break
         }
+        go handleClient(conn)
     }
 }
