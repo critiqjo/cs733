@@ -53,7 +53,7 @@ type ResOkVer struct {
 func (r *ResOkVer) ResponseDummy() {}
 
 type ResError struct {
-    desc string
+    Desc string
 }
 func (r *ResError) ResponseDummy() {}
 
