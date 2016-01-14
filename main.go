@@ -3,6 +3,7 @@ package main
 import (
     "bufio"
     "fmt"
+    "io"
     "net"
 )
 
@@ -17,12 +18,14 @@ func main() {
     }
     rstream := bufio.NewReader(conn)
     for {
-        p := ParseRequest(rstream)
+        p, e := ParseRequest(rstream)
         if p != nil {
             fmt.Println("Yay!")
         } else {
             fmt.Println("No!")
-            break
+            if e == io.EOF {
+                break
+            }
         }
     }
 }
