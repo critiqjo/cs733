@@ -11,7 +11,6 @@ func (r *ReqRead) RequestDummy() {}
 
 type ReqWrite struct {
     FileName string
-    Size uint64
     ExpTime uint64
     Contents []byte
 }
@@ -20,7 +19,6 @@ func (r *ReqWrite) RequestDummy() {}
 type ReqCaS struct {
     FileName string
     Version uint64
-    Size uint64
     ExpTime uint64
     Contents []byte
 }
@@ -41,7 +39,6 @@ func (r *ResOk) ResponseDummy() {}
 type ResContents struct {
     FileName string
     Version uint64
-    Size uint64
     ExpTime uint64
     Contents []byte
 }

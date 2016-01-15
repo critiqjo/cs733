@@ -31,7 +31,7 @@ func handleClient(conn net.Conn, storeChan chan Action) {
                 resHead = fmt.Sprintf("OK %d\r\n", r.Version)
             case *ResContents:
                 resHead = fmt.Sprintf("CONTENTS %d %d %d\r\n",
-                                      r.Version, r.Size, r.ExpTime)
+                                      r.Version, len(r.Contents), r.ExpTime)
                 resBody = r.Contents
             case *ResError:
                 resHead = fmt.Sprintf("ERR_%s\r\n", r.Desc)

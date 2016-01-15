@@ -31,7 +31,6 @@ func ParseRequest(stream *bufio.Reader) (Request, error) {
         contents, err := consumeWithCRLF(stream, size)
         if err != nil { return nil, err }
         return &ReqWrite { FileName: matches[1],
-                           Size: size,
                            ExpTime: exp,
                            Contents: contents,
                          }, nil
@@ -50,7 +49,6 @@ func ParseRequest(stream *bufio.Reader) (Request, error) {
         if err != nil { return nil, err }
         return &ReqCaS { FileName: matches[1],
                          Version: ver,
-                         Size: size,
                          ExpTime: exp,
                          Contents: contents,
                        }, nil
