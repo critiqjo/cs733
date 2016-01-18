@@ -1,6 +1,9 @@
 package main
 
-import "errors"
+import (
+    "errors"
+    "math/rand"
+)
 
 type Action struct {
     Req Request
@@ -17,14 +20,15 @@ type store map[string]*storeData
 
 var FileNotFound = "FILE_NOT_FOUND"
 var VersionMismatch = "VERSION"
+var InternalError = "INTERNAL"
 
-func InitStore() chan Action {
+func InitStore() chan<- Action {
     ca := make(chan Action)
     go actionLoop(ca)
     return ca
 }
 
-func actionLoop(ca chan Action) {
+func actionLoop(ca <-chan Action) {
     var s store = make(map[string]*storeData)
     for {
         action := <-ca
@@ -43,7 +47,7 @@ func actionLoop(ca chan Action) {
                 }
             }
         case *ReqWrite:
-            ver := s.Set(req.FileName, storeData {
+            ver := s.Set(req.FileName, &storeData {
                 Version: 0,
                 ExpTime: req.ExpTime,
                 Contents: req.Contents,
@@ -51,7 +55,7 @@ func actionLoop(ca chan Action) {
             res = &ResOkVer { Version: ver }
         case *ReqCaS:
             // use version 0 to write only if does not exist
-            ver, err := s.CaS(req.FileName, storeData {
+            ver, err := s.CaS(req.FileName, &storeData {
                 Version: req.Version,
                 ExpTime: req.ExpTime,
                 Contents: req.Contents,
@@ -84,20 +88,22 @@ func (s store) Version(key string) uint64 {
     }
 }
 
-func (s store) Set(key string, value storeData) uint64 {
-    if value.Version == 0 {
-        value.Version = s.Version(key) + 1
+func (s store) Set(key string, value *storeData) uint64 {
+    // value.Version is ignored
+    curver := s.Version(key)
+    if curver == 0 {
+        value.Version = uint64(rand.Uint32()) + 1
+    } else {
+        value.Version = curver + 1
     }
-    s[key] = &value
+    s[key] = value
     return value.Version
 }
 
-func (s store) CaS(key string, value storeData) (uint64, error) {
-    // not threadsafe
+func (s store) CaS(key string, value *storeData) (uint64, error) {
+    // value.Version is matched with the current version; not threadsafe
     if value.Version == s.Version(key) {
-        value.Version += 1
-        s[key] = &value
-        return value.Version, nil
+        return s.Set(key, value), nil
     } else if s.Version(key) == 0 {
         return 0, errors.New(FileNotFound)
     } else {

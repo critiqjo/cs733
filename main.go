@@ -7,7 +7,7 @@ import (
     "net"
 )
 
-func handleClient(conn net.Conn, storeChan chan Action) {
+func handleClient(conn net.Conn, storeChan chan<- Action) {
     rstream := bufio.NewReader(conn)
     wstream := bufio.NewWriter(conn)
     defer conn.Close()
@@ -46,9 +46,10 @@ func handleClient(conn net.Conn, storeChan chan Action) {
             }
         } else if err != io.EOF {
             _, err = wstream.WriteString("ERR_CMD_ERR\r\n")
-        } // else, err == io.EOF, so break!
+            // break on any error?
+        }
 
-        if err != nil { break }
+        if err != nil { break } // EOF or writing failed
         wstream.Flush()
     }
 }
