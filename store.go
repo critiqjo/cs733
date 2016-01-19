@@ -3,6 +3,8 @@ package main
 import (
     "errors"
     "math/rand"
+    "time"
+    "github.com/davecheney/junk/clock"
 )
 
 type Action struct {
@@ -12,7 +14,7 @@ type Action struct {
 
 type storeData struct {
     Version uint64 // if version is 0, a new version is automatically assigned
-    ExpTime uint64
+    ExpTime time.Time
     Contents []byte
 }
 
@@ -28,6 +30,28 @@ func InitStore() chan<- Action {
     return ca
 }
 
+func expiryTime(delaySecs uint64) time.Time {
+    if delaySecs == 0 {
+        return time.Unix(0, 0)
+    } else {
+        dur := time.Duration(delaySecs) * time.Second
+        return clock.Monotonic.Now().Add(dur)
+    }
+}
+
+func remainingSecs(t time.Time) (uint64, bool) {
+    if t == time.Unix(0, 0) {
+        return 0, true
+    } else {
+        rem := int64(t.Sub(clock.Monotonic.Now()))
+        if rem >= 0 {
+            return uint64(rem/int64(time.Second) + 1), true
+        } else {
+            return 0, false
+        }
+    }
+}
+
 func actionLoop(ca <-chan Action) {
     var s store = make(map[string]*storeData)
     for {
@@ -39,17 +63,18 @@ func actionLoop(ca <-chan Action) {
             if data == nil {
                 res = &ResError { Desc: FileNotFound }
             } else {
+                rem, _ := remainingSecs(data.ExpTime)
                 res = &ResContents {
                     FileName: req.FileName,
                     Version: data.Version,
-                    ExpTime: data.ExpTime,
+                    ExpTime: rem,
                     Contents: data.Contents,
                 }
             }
         case *ReqWrite:
             ver := s.Set(req.FileName, &storeData {
                 Version: 0,
-                ExpTime: req.ExpTime,
+                ExpTime: expiryTime(req.ExpTime),
                 Contents: req.Contents,
             })
             res = &ResOkVer { Version: ver }
@@ -57,7 +82,7 @@ func actionLoop(ca <-chan Action) {
             // use version 0 to write only if does not exist
             ver, err := s.CaS(req.FileName, &storeData {
                 Version: req.Version,
-                ExpTime: req.ExpTime,
+                ExpTime: expiryTime(req.ExpTime),
                 Contents: req.Contents,
             })
             if ver > 0 {
@@ -77,14 +102,25 @@ func actionLoop(ca <-chan Action) {
 }
 
 func (s store) Get(key string) *storeData {
-    return s[key] // nil if does not exist
+    value := s[key]
+    if value != nil {
+        _, ok := remainingSecs(value.ExpTime)
+        if ok {
+            return value
+        } else {
+            s.Unset(key)
+            return nil
+        }
+    }
+    return nil
 }
 
 func (s store) Version(key string) uint64 {
-    if s[key] == nil {
+    value := s.Get(key)
+    if value == nil {
         return 0
     } else {
-        return s[key].Version
+        return value.Version
     }
 }
 
@@ -112,9 +148,10 @@ func (s store) CaS(key string, value *storeData) (uint64, error) {
 }
 
 func (s store) Unset(key string) bool {
-    if _, ok := s[key]; ok {
+    if value, ok := s[key]; ok {
+        _, ok := remainingSecs(value.ExpTime)
         delete(s, key)
-        return true
+        if ok { return true } else { return false }
     } else {
         return false
     }
