@@ -3,13 +3,14 @@ package main
 import (
     "bufio"
     "errors"
+    "io"
     "regexp"
     "strconv"
 )
 
-func ParseRequest(stream *bufio.Reader) (Request, error) {
+func ParseRequest(rstream *bufio.Reader) (Request, error) {
     // FileName is assumed to have no whitespace characters including \r and \n
-    str, err := stream.ReadString('\n')
+    str, err := rstream.ReadString('\n')
     if err != nil { // if and only if str does not end in '\n'
         return nil, err
     }
@@ -23,12 +24,12 @@ func ParseRequest(stream *bufio.Reader) (Request, error) {
     pat = regexp.MustCompile("^write ([^ ]+) ([0-9]+) ?([0-9]+)?\r\n$")
     matches = pat.FindStringSubmatch(str)
     if len(matches) > 0 {
-        size, _ := strconv.ParseUint(matches[2], 10, 64)
+        size, _ := strconv.Atoi(matches[2])
         var exp uint64 = 0
         if len(matches[3]) > 0 {
             exp, _ = strconv.ParseUint(matches[3], 10, 64)
         }
-        contents, err := consumeWithCRLF(stream, size)
+        contents, err := getContentsSkipCRLF(rstream, size)
         if err != nil { return nil, err }
         return &ReqWrite { FileName: matches[1],
                            ExpTime: exp,
@@ -40,12 +41,12 @@ func ParseRequest(stream *bufio.Reader) (Request, error) {
     matches = pat.FindStringSubmatch(str)
     if len(matches) > 0 {
         ver, _ := strconv.ParseUint(matches[2], 10, 64)
-        size, _ := strconv.ParseUint(matches[3], 10, 64)
+        size, _ := strconv.Atoi(matches[3])
         var exp uint64 = 0
         if len(matches[4]) > 0 {
             exp, _ = strconv.ParseUint(matches[4], 10, 64)
         }
-        contents, err := consumeWithCRLF(stream, size)
+        contents, err := getContentsSkipCRLF(rstream, size)
         if err != nil { return nil, err }
         return &ReqCaS { FileName: matches[1],
                          Version: ver,
@@ -63,22 +64,19 @@ func ParseRequest(stream *bufio.Reader) (Request, error) {
     return nil, errors.New("Invalid format!")
 }
 
-func consumeWithCRLF(stream *bufio.Reader, size uint64) ([]byte, error) {
+func getContentsSkipCRLF(rstream *bufio.Reader, size int) ([]byte, error) {
+    // Reads size bytes, consumes until LF is found (trail), then matches the
+    // trail with CRLF. Returns size bytes if everything went well, else nil
     contents := make([]byte, size)
-    var readsize uint64 = 0
-    var n int = 0
-    var e error
-    for readsize < size {
-        if n == 0 && e != nil {
-            return nil, e
-        }
-        slice := contents[readsize:]
-        n, e = stream.Read(slice)
-        readsize += uint64(n)
+    _, err := io.ReadFull(rstream, contents)
+    if err != nil {
+        return nil, err
     }
-    l, _ := stream.ReadSlice('\n')
-    if len(l) != 2 || l[0] != '\r' || l[1] != '\n' {
-        return nil, errors.New("Bad ending!")
+    trail, err := rstream.ReadSlice('\n')
+    if err != nil {
+        return nil, err
+    } else if len(trail) != 2 || trail[0] != '\r' || trail[1] != '\n' {
+        return nil, errors.New("Contents did not end in CRLF")
     }
     return contents, nil
 }

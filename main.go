@@ -57,11 +57,11 @@ func handleClient(conn net.Conn, storeChan chan<- Action) {
 func main() {
     ln, err := net.Listen("tcp", ":8080")
     if err != nil {
+        fmt.Println(err)
         return
     }
 
     storeChan := InitStore()
-    fmt.Println("Waiting for clients!")
     for {
         conn, err := ln.Accept()
         if err != nil {
