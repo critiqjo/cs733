@@ -94,6 +94,50 @@ func TestErrors(t *testing.T) {
     expectContents(t, rstream, []byte(contents))
 }
 
+func TestTimeouts(t *testing.T) {
+    conn, rstream := newTest(t, 8)
+    defer conn.Close()
+
+    contents := "\r\n"
+    timeout0 := 4
+
+    fmt.Fprintf(conn, "write file %v %v\r\n%v\r\n",
+                      len(contents), timeout0, contents)
+    matches := expectLinePat(t, rstream, "OK ([0-9]+)\r\n")
+    ver, _ := strconv.ParseUint(matches[1], 10, 64)
+
+    fmt.Fprintf(conn, "read file\r\n")
+    matches = expectLinePat(t, rstream,
+                            fmt.Sprintf("CONTENTS %v %v ([0-9]+) ?\r\n",
+                                        ver, len(contents)))
+    timeout1, _ := strconv.Atoi(matches[1])
+    if timeout1 > timeout0 {
+        t.Error("Greater timeout value:", timeout1)
+    }
+    expectContents(t, rstream, []byte(contents))
+
+    if timeout1 == timeout0 {
+        time.Sleep(1 * time.Second + 400 * time.Millisecond)
+        fmt.Fprintf(conn, "read file\r\n")
+        matches = expectLinePat(t, rstream,
+                                fmt.Sprintf("CONTENTS %v %v ([0-9]+) ?\r\n",
+                                            ver, len(contents)))
+        timeout1, _ = strconv.Atoi(matches[1])
+        if timeout1 >= timeout0 {
+            t.Error("Timeout did not count down:", timeout1)
+        }
+        expectContents(t, rstream, []byte(contents))
+    }
+
+    if timeout1 < 0 {
+        t.Fatal("Negative timeout value:", timeout1)
+    }
+
+    time.Sleep(time.Duration(timeout1 + 1) * time.Second)
+    fmt.Fprintf(conn, "read file\r\n")
+    _ = expectLinePat(t, rstream, "ERR_FILE_NOT_FOUND\r\n")
+}
+
 func expectLinePat(t *testing.T, rstream *bufio.Reader, pattern string) []string {
     str, err := rstream.ReadString('\n')
     if err != nil {

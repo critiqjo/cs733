@@ -2,6 +2,7 @@ package main
 
 import (
     "errors"
+    "math"
     "math/rand"
     "time"
     "github.com/davecheney/junk/clock"
@@ -43,9 +44,9 @@ func remainingSecs(t time.Time) (uint64, bool) {
     if t == time.Unix(0, 0) {
         return 0, true
     } else {
-        rem := int64(t.Sub(clock.Monotonic.Now()))
-        if rem >= 0 {
-            return uint64(rem/int64(time.Second) + 1), true
+        rem := float64(t.Sub(clock.Monotonic.Now()))/float64(time.Second)
+        if rem > 0.0 {
+            return uint64(math.Ceil(rem)), true
         } else {
             return 0, false
         }

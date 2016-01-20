@@ -45,12 +45,11 @@ func handleClient(conn net.Conn, storeChan chan<- Action) {
                 }
             }
         } else if err != io.EOF {
-            _, err = wstream.WriteString("ERR_CMD_ERR\r\n")
-            // break on any error?
+            _, _ = wstream.WriteString("ERR_CMD_ERR\r\n")
         }
 
-        if err != nil { break } // EOF or writing failed
-        wstream.Flush()
+        err2 := wstream.Flush()
+        if err != nil || err2 != nil { break } // EOF, failed write, or CMD_ERR
     }
 }
 
