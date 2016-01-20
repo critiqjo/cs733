@@ -143,6 +143,74 @@ func TestTimeouts(t *testing.T) {
     _ = expectLinePat(t, rstream, "ERR_FILE_NOT_FOUND\r\n")
 }
 
+type casResp struct {
+    head string
+    vers uint64
+    cont string
+}
+
+func TestMultiCaS(t *testing.T) {
+    conn, rstream := newTest(t, 8)
+    defer conn.Close()
+
+    clients := 16
+    file := "file"
+    contents := "qwer"
+
+    fmt.Fprintf(conn, "write %v %v\r\n%v\r\n", file, len(contents), contents)
+    matches := expectLinePat(t, rstream, "OK ([0-9]+)\r\n")
+    ver, _ := strconv.ParseUint(matches[1], 10, 64)
+
+    rc := make(chan casResp)
+    for i := 0; i < clients; i += 1 {
+        conn, rstream := newTest(t, 8)
+        defer conn.Close()
+        go casCheck(t, rc, conn, rstream, file, ver, contents + strconv.Itoa(i))
+    }
+
+    oked := 0
+    var vernew uint64 = 0
+    var contnew string
+
+    for i := 0; i < clients; i += 1 {
+        tc := time.After(1 * time.Second)
+        select {
+        case resp := <-rc:
+            if resp.head == "OK" {
+                oked += 1
+                contnew = resp.cont
+            }
+            if i == 0 {
+                vernew = resp.vers
+            } else if vernew != resp.vers {
+                t.Error("Response versions mismatch!")
+            }
+        case <-tc:
+            t.Fatal("Timed out!")
+        }
+    }
+
+    if vernew == ver {
+        t.Error("Response version did not change!")
+    } else if oked != 1 {
+        t.Errorf("OK was received %v times!", oked)
+    } else {
+        fmt.Fprintf(conn, "read %v\r\n", file)
+        _ = expectLinePat(t, rstream, fmt.Sprintf("CONTENTS %v %v 0 ?\r\n",
+                                                  vernew, len(contnew)))
+        expectContents(t, rstream, []byte(contnew))
+    }
+}
+
+func casCheck(t *testing.T, rc chan<- casResp,
+              conn net.Conn, rstream *bufio.Reader,
+              file string, ver uint64, contents string) {
+    fmt.Fprintf(conn, "cas %v %v %v\r\n%v\r\n", file, ver, len(contents), contents)
+    matches := expectLinePat(t, rstream, "(OK|ERR_VERSION) ([0-9]+)\r\n")
+    ver, _ = strconv.ParseUint(matches[2], 10, 64)
+    rc <- casResp{head: matches[1], vers: ver, cont: contents}
+}
+
 func expectLinePat(t *testing.T, rstream *bufio.Reader, pattern string) []string {
     str, err := rstream.ReadString('\n')
     if err != nil {
