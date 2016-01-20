@@ -31,7 +31,7 @@ func newTest(t *testing.T, deadline time.Duration) (net.Conn, *bufio.Reader) {
 }
 
 func TestBasics(t *testing.T) {
-    conn, rstream := newTest(t, 3)
+    conn, rstream := newTest(t, 4)
     defer conn.Close()
 
     contents := "ab\r\ncd"
@@ -57,7 +57,9 @@ func TestBasics(t *testing.T) {
         t.Error("Version unchanged after successive writes")
     }
 
-    fmt.Fprintf(conn, "read abcd\r\n")
+    fmt.Fprintf(conn, "rea")
+    time.Sleep(200 * time.Millisecond)
+    fmt.Fprintf(conn, "d abcd\r\n")
     _ = expectLinePat(t, rstream, fmt.Sprintf("CONTENTS %v %v 0 ?\r\n",
                                               ver2, len(contents)))
     expectContents(t, rstream, []byte(contents))
@@ -86,7 +88,10 @@ func TestErrors(t *testing.T) {
     ver, _ := strconv.ParseUint(matches[1], 10, 64)
 
     fmt.Fprintf(conn, "cas abcd %v 4\r\njunk\r\n", ver + 1)
-    matches = expectLinePat(t, rstream, "ERR_VERSION\r\n")
+    matches = expectLinePat(t, rstream, "ERR_VERSION ([0-9]+)\r\n")
+    if ver2, _ := strconv.ParseUint(matches[1], 10, 64); ver2 != ver {
+        t.Errorf("Expected version %v, found %v", ver, ver2)
+    }
 
     fmt.Fprintf(conn, "read abcd\r\n")
     _ = expectLinePat(t, rstream, fmt.Sprintf("CONTENTS %v %v 0 ?\r\n",
@@ -99,7 +104,7 @@ func TestTimeouts(t *testing.T) {
     defer conn.Close()
 
     contents := "\r\n"
-    timeout0 := 4
+    timeout0 := 3
 
     fmt.Fprintf(conn, "write file %v %v\r\n%v\r\n",
                       len(contents), timeout0, contents)
@@ -117,7 +122,7 @@ func TestTimeouts(t *testing.T) {
     expectContents(t, rstream, []byte(contents))
 
     if timeout1 == timeout0 {
-        time.Sleep(1 * time.Second + 400 * time.Millisecond)
+        time.Sleep(1 * time.Second + 200 * time.Millisecond)
         fmt.Fprintf(conn, "read file\r\n")
         matches = expectLinePat(t, rstream,
                                 fmt.Sprintf("CONTENTS %v %v ([0-9]+) ?\r\n",

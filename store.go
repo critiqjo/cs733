@@ -2,6 +2,7 @@ package main
 
 import (
     "errors"
+    "fmt"
     "math"
     "math/rand"
     "time"
@@ -139,12 +140,13 @@ func (s store) Set(key string, value *storeData) uint64 {
 
 func (s store) CaS(key string, value *storeData) (uint64, error) {
     // value.Version is matched with the current version; not threadsafe
-    if value.Version == s.Version(key) {
+    curver := s.Version(key)
+    if value.Version == curver {
         return s.Set(key, value), nil
     } else if s.Version(key) == 0 {
         return 0, errors.New(FileNotFound)
     } else {
-        return 0, errors.New(VersionMismatch)
+        return 0, errors.New(fmt.Sprintf("%v %v", VersionMismatch, curver))
     }
 }
 
