@@ -1,57 +1,65 @@
 package main
 
 type Request interface {
-    RequestDummy()
+	RequestDummy()
 }
 
 type ReqRead struct {
-    FileName string
+	FileName string
 }
+
 func (r *ReqRead) RequestDummy() {}
 
 type ReqWrite struct {
-    FileName string
-    ExpTime uint64
-    Contents []byte
+	FileName string
+	ExpTime  uint64
+	Contents []byte
 }
+
 func (r *ReqWrite) RequestDummy() {}
 
 type ReqCaS struct {
-    FileName string
-    Version uint64
-    ExpTime uint64
-    Contents []byte
+	FileName string
+	Version  uint64
+	ExpTime  uint64
+	Contents []byte
 }
+
 func (r *ReqCaS) RequestDummy() {}
 
 type ReqDelete struct {
-    FileName string
+	FileName string
 }
+
 func (r *ReqDelete) RequestDummy() {}
 
 type Response interface {
-    ResponseDummy()
+	ResponseDummy()
 }
 
-type ResOk struct { }
+type ResOk struct{}
+
 func (r *ResOk) ResponseDummy() {}
 
 type ResContents struct {
-    FileName string
-    Version uint64
-    ExpTime uint64
-    Contents []byte
+	FileName string
+	Version  uint64
+	ExpTime  uint64
+	Contents []byte
 }
+
 func (r *ResContents) ResponseDummy() {}
 
 type ResOkVer struct {
-    Version uint64
+	Version uint64
 }
+
 func (r *ResOkVer) ResponseDummy() {}
 
 type ResError struct {
-    Desc string
+	Desc string
 }
+
 func (r *ResError) ResponseDummy() {}
 
 // missing Rust's enum :(
