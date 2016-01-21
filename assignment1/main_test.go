@@ -281,16 +281,14 @@ func expectContents(t *testing.T, rstream *bufio.Reader, expected []byte) {
 }
 
 func getContents(t *testing.T, rstream *bufio.Reader, size int) []byte {
-	contents := make([]byte, size)
+	contents := make([]byte, size+2)
 	_, err := io.ReadFull(rstream, contents)
 	if err != nil {
 		t.Fatal("Bad contents:", err.Error())
 	}
-	trail, err := rstream.ReadSlice('\n')
-	if err != nil {
-		t.Fatal("Bad contents:", err.Error())
-	} else if len(trail) != 2 || trail[0] != '\r' || trail[1] != '\n' {
+	trail := contents[size:]
+	if trail[0] != '\r' || trail[1] != '\n' {
 		t.Fatal("Bad contents: did not end in CRLF")
 	}
-	return contents
+	return contents[:size]
 }

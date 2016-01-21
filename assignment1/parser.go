@@ -73,16 +73,14 @@ func ParseRequest(rstream *bufio.Reader) (Request, error) {
 func getContentsSkipCRLF(rstream *bufio.Reader, size int) ([]byte, error) {
 	// Reads size bytes, consumes until LF is found (trail), then matches the
 	// trail with CRLF. Returns size bytes if everything went well, else nil
-	contents := make([]byte, size)
+	contents := make([]byte, size+2)
 	_, err := io.ReadFull(rstream, contents)
 	if err != nil {
 		return nil, err
 	}
-	trail, err := rstream.ReadSlice('\n')
-	if err != nil {
-		return nil, err
-	} else if len(trail) != 2 || trail[0] != '\r' || trail[1] != '\n' {
+	trail := contents[size:]
+	if trail[0] != '\r' || trail[1] != '\n' {
 		return nil, errors.New("Contents did not end in CRLF")
 	}
-	return contents, nil
+    return contents[:size], nil
 }
