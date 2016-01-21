@@ -53,7 +53,7 @@ func handleClient(conn net.Conn, storeChan chan<- Action) {
     }
 }
 
-func main() {
+func serverMain() {
     ln, err := net.Listen("tcp", ":8080")
     if err != nil {
         fmt.Println(err)
@@ -69,4 +69,8 @@ func main() {
         }
         go handleClient(conn, storeChan)
     }
+}
+
+func main() {
+    serverMain()
 }

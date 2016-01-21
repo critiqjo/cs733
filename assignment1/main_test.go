@@ -12,7 +12,7 @@ import (
 )
 
 func init() {
-    go main()
+    go serverMain()
     time.Sleep(100 * time.Millisecond)
 }
 
