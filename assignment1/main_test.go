@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"regexp"
 	"strconv"
@@ -143,7 +144,7 @@ func TestTimeouts(t *testing.T) {
 	_ = expectLinePat(t, rstream, "ERR_FILE_NOT_FOUND\r\n")
 }
 
-type casResp struct {
+type testResp struct {
 	head string
 	vers uint64
 	cont string
@@ -154,14 +155,14 @@ func TestMultiCaS(t *testing.T) {
 	defer conn.Close()
 
 	clients := 16
-	file := "file"
+	file := "test" + strconv.Itoa(rand.Int())
 	contents := "qwer"
 
 	fmt.Fprintf(conn, "write %v %v\r\n%v\r\n", file, len(contents), contents)
 	matches := expectLinePat(t, rstream, "OK ([0-9]+)\r\n")
 	ver, _ := strconv.ParseUint(matches[1], 10, 64)
 
-	rc := make(chan casResp)
+	rc := make(chan testResp)
 	for i := 0; i < clients; i += 1 {
 		go casClient(t, rc, file, ver, contents+strconv.Itoa(i))
 	}
@@ -200,13 +201,57 @@ func TestMultiCaS(t *testing.T) {
 	}
 }
 
-func casClient(t *testing.T, rc chan<- casResp, file string, ver uint64, contents string) {
+func casClient(t *testing.T, rc chan<- testResp, file string, ver uint64, contents string) {
 	conn, rstream := newTest(t, 3)
 	defer conn.Close()
 	fmt.Fprintf(conn, "cas %v %v %v\r\n%v\r\n", file, ver, len(contents), contents)
 	matches := expectLinePat(t, rstream, "(OK|ERR_VERSION) ([0-9]+)\r\n")
 	ver, _ = strconv.ParseUint(matches[2], 10, 64)
-	rc <- casResp{matches[1], ver, contents}
+	rc <- testResp{matches[1], ver, contents}
+}
+
+func TestMultiWrite(t *testing.T) {
+	conn, rstream := newTest(t, 8)
+	defer conn.Close()
+
+	clients := 16
+	file := "test" + strconv.Itoa(rand.Int())
+	contents := "zxcv"
+
+	rc := make(chan testResp)
+	for i := 0; i < clients; i += 1 {
+		go writeClient(t, rc, file, contents+strconv.Itoa(i))
+	}
+
+	var vcmap = make(map[uint64]string)
+
+	for i := 0; i < clients; i += 1 {
+		tc := time.After(1 * time.Second)
+		select {
+		case resp := <-rc:
+			vcmap[resp.vers] = resp.cont
+		case <-tc:
+			t.Fatal("Timed out!")
+		}
+	}
+
+	if len(vcmap) != clients {
+		t.Error("Number of different versions != Number of write clients")
+	} else {
+		fmt.Fprintf(conn, "read %v\r\n", file)
+		matches := expectLinePat(t, rstream, "CONTENTS ([0-9]+) [0-9]+ 0 ?\r\n")
+		ver, _ := strconv.ParseUint(matches[1], 10, 64)
+		expectContents(t, rstream, []byte(vcmap[ver]))
+	}
+}
+
+func writeClient(t *testing.T, rc chan<- testResp, file string, contents string) {
+	conn, rstream := newTest(t, 3)
+	defer conn.Close()
+	fmt.Fprintf(conn, "write %v %v\r\n%v\r\n", file, len(contents), contents)
+	matches := expectLinePat(t, rstream, "OK ([0-9]+)\r\n")
+	ver, _ := strconv.ParseUint(matches[1], 10, 64)
+	rc <- testResp{"OK", ver, contents}
 }
 
 func expectLinePat(t *testing.T, rstream *bufio.Reader, pattern string) []string {
