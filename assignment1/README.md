@@ -66,7 +66,7 @@ optional fields).
 
 ### Points of note
 
-* When a file is created, a random non-negative 31-bit integer is used as its
+* When a file is created, a 32-bit random positive integer is used as its
   initial version.
 * Versions are incremented by one on each update (do not rely on this).
 * The server maintains only the latest version of a file.

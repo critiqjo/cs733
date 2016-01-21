@@ -163,9 +163,7 @@ func TestMultiCaS(t *testing.T) {
 
 	rc := make(chan casResp)
 	for i := 0; i < clients; i += 1 {
-		conn, rstream := newTest(t, 8)
-		defer conn.Close()
-		go casCheck(t, rc, conn, rstream, file, ver, contents+strconv.Itoa(i))
+		go casClient(t, rc, file, ver, contents+strconv.Itoa(i))
 	}
 
 	oked := 0
@@ -202,13 +200,13 @@ func TestMultiCaS(t *testing.T) {
 	}
 }
 
-func casCheck(t *testing.T, rc chan<- casResp,
-	conn net.Conn, rstream *bufio.Reader,
-	file string, ver uint64, contents string) {
+func casClient(t *testing.T, rc chan<- casResp, file string, ver uint64, contents string) {
+	conn, rstream := newTest(t, 3)
+	defer conn.Close()
 	fmt.Fprintf(conn, "cas %v %v %v\r\n%v\r\n", file, ver, len(contents), contents)
 	matches := expectLinePat(t, rstream, "(OK|ERR_VERSION) ([0-9]+)\r\n")
 	ver, _ = strconv.ParseUint(matches[2], 10, 64)
-	rc <- casResp{head: matches[1], vers: ver, cont: contents}
+	rc <- casResp{matches[1], ver, contents}
 }
 
 func expectLinePat(t *testing.T, rstream *bufio.Reader, pattern string) []string {
