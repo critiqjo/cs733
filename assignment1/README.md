@@ -78,4 +78,4 @@ optional fields).
 * For `cas`, providing a version `0` means "only create" (file must not exist).
 * The server should be immune to changes of system time, thanks to
   [`CLOCK_MONOTONIC`](https://github.com/davecheney/junk/tree/master/clock),
-  but this restricts its portability to Linux systems.
+  but this limits its portability to Linux systems alone.
