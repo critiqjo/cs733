@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"github.com/davecheney/junk/clock"
 	"math"
 	"math/rand"
 	"time"
@@ -37,7 +36,7 @@ func expiryTime(delaySecs uint64) time.Time {
 		return time.Unix(0, 0)
 	} else {
 		dur := time.Duration(delaySecs) * time.Second
-		return clock.Monotonic.Now().Add(dur)
+		return ServerTime().Add(dur)
 	}
 }
 
@@ -45,7 +44,7 @@ func remainingSecs(t time.Time) (uint64, bool) {
 	if t == time.Unix(0, 0) {
 		return 0, true
 	} else {
-		rem := float64(t.Sub(clock.Monotonic.Now())) / float64(time.Second)
+		rem := float64(t.Sub(ServerTime())) / float64(time.Second)
 		if rem > 0.0 {
 			return uint64(math.Ceil(rem)), true
 		} else {

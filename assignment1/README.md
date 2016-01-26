@@ -76,6 +76,5 @@ optional fields).
 * For `read`, the returned `<time2exp>` is `ceil` of the time to expire in
   seconds (so that `0` is only ever returned if the file has no expiration).
 * For `cas`, providing a version `0` means "only create" (file must not exist).
-* The server should be immune to changes of system time, thanks to
-  [`CLOCK_MONOTONIC`](https://github.com/davecheney/junk/tree/master/clock),
-  but this limits its portability to Linux systems alone.
+* The server should be immune to changes of system time in Linux systems, thanks
+  to [`CLOCK_MONOTONIC`](https://github.com/davecheney/junk/tree/master/clock).
