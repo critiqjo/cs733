@@ -34,6 +34,7 @@ type RaftNode struct {
     pster Persister
     machn Machine
     notifch chan Message
+    timer *ProTimer
     consensus rConsensus
 }
 
@@ -50,16 +51,21 @@ func NewRaftNode(serverId int, msger Messenger, pster Persister, machn Machine) 
     }
     notifch := make(chan Message)
     msger.Register(notifch)
+    log := pster.LogRead()
+    if log == nil {
+        // simplification: to avoid a few checks for empty log
+        log = []RaftLogEntry { RaftLogEntry { 0, 0, nil } }
+    }
     return RaftNode {
-        msger, pster, machn, notifch,
+        msger, pster, machn, notifch, nil,
         rConsensus {
             id: serverId,
-            log: pster.LogRead(),
+            log: log,
             term: term,
             votedFor: votedFor,
             state: follower,
             commitIdx: 0,
-            lastAppld: 0, // TODO init using machn.LastApplied()
+            lastAppld: 0, // TODO init using machn.LoadSnapshot()
             voteCount: 0,
             nextIdx: nil,
             matchIdx: nil,
@@ -67,45 +73,96 @@ func NewRaftNode(serverId int, msger Messenger, pster Persister, machn Machine) 
     }
 }
 
-func teller(ch chan Message, version uint64) func() {
-    return func() {
-        ch <- &timeout { version }
-    }
-}
-
-func (raft *RaftNode) Run() { // event loop, waits on notifch, and for timeouts
-    var timerVer uint64 = 0
-    var timer *time.Timer = nil
-    var timerReset = func(duration time.Duration) {
-        if timer == nil || !timer.Reset(duration) {
-            timerVer += 1
-            timer = time.AfterFunc(duration, teller(raft.notifch, timerVer))
+// event loop, waits on notifch, and for timeouts
+func (self *RaftNode) Run(timeoutSampler func() time.Duration) {
+    self.timer = NewProTimer(func(v uint64) func() {
+        return func() {
+            self.notifch <- &timeout { v }
         }
-    }
-    randomDuration := 1 * time.Second
-    timerReset(randomDuration)
-    loop:
+    }, timeoutSampler)
+    self.timer.Reset()
     for {
-        switch msg := (<-raft.notifch).(type) {
-        case *AppendEntries:
-            break
-        case *RequestVote:
-            break
-        case *AppendEntriesResp:
-            break
-        case *RequestVoteResp:
-            break
-        case *ClientRequest:
-            break
-        case *timeout:
-            if msg.version == 1 { break loop }
+        msg := <-self.notifch
+        switch self.consensus.state {
+        case follower:
+            self.followerHandler(msg)
+        case candidate:
+            self.candidateHandler(msg)
+        case leader:
+            self.leaderHandler(msg)
+        }
+        break
+    }
+}
+
+func (self *RaftNode) followerHandler(m Message) {
+    switch msg := m.(type) {
+    case *AppendEntries:
+        break
+    case *RequestVote:
+        break
+    case *AppendEntriesResp:
+        break
+    case *RequestVoteResp:
+        break
+    case *ClientRequest:
+        if self.consensus.votedFor > -1 {
+            self.msger.Client301(msg.UID, self.consensus.votedFor)
+        } else {
+            self.msger.Client503(msg.UID)
+        }
+    case *timeout:
+        if self.timer.Match(msg.version) {
+            self.consensus.term += 1
+            self.consensus.votedFor = self.consensus.id
+            self.consensus.state = candidate
+            lastIdx := len(self.consensus.log) - 1
+            self.msger.BroadcastRequestVote(&RequestVote {
+                self.consensus.term,
+                self.consensus.id,
+                self.consensus.log[lastIdx].Index,
+                self.consensus.log[lastIdx].Term,
+            })
+            self.timer.Reset()
         }
     }
 }
 
-type LogEntry interface {
-    UID() uint64
+func (self *RaftNode) candidateHandler(m Message) {
+    switch msg := m.(type) {
+    case *AppendEntries:
+        break
+    case *RequestVote:
+        break
+    case *AppendEntriesResp:
+        break
+    case *RequestVoteResp:
+        break
+    case *ClientRequest:
+        self.msger.Client503(msg.UID)
+    case *timeout:
+        if self.timer.Match(msg.version) { break }
+    }
 }
+
+func (self *RaftNode) leaderHandler(m Message) {
+    switch msg := m.(type) {
+    case *AppendEntries:
+        break
+    case *RequestVote:
+        break
+    case *AppendEntriesResp:
+        break
+    case *RequestVoteResp:
+        break
+    case *ClientRequest:
+        break
+    case *timeout:
+        if self.timer.Match(msg.version) { break }
+    }
+}
+
+type LogEntry interface {}
 
 type RaftLogEntry struct {
     Term uint64
@@ -143,6 +200,7 @@ type RequestVoteResp struct {
 }
 
 type ClientRequest struct {
+    UID uint64
     Entry LogEntry
 }
 
@@ -150,12 +208,15 @@ type timeout struct {
     version uint64
 }
 
+// TODO configuration change request
+
 type Messenger interface {
     // Must maintain a map from serverIds to (network) address/socket
     Register(notifch chan<- Message)
-    SendAppendEntries(server int, message AppendEntries)
-    BroadcastRequestVote(message RequestVote)
-    RedirectTo(uid uint64, server int) // redirect a client/request to another server (possibly the leader)
+    SendAppendEntries(server int, msg *AppendEntries)
+    BroadcastRequestVote(msg *RequestVote)
+    Client301(uid uint64, server int) // redirect to another server (possibly the leader)
+    Client503(uid uint64) // service temporarily unavailable
 }
 
 type PersistentState struct {
@@ -165,20 +226,22 @@ type PersistentState struct {
 
 type Persister interface {
     LogAppend(RaftLogEntry)
-    LogCompact(uint64)
+    LogDiscard(uint64)
     LogRead() []RaftLogEntry
     StateRead() *PersistentState // return InitState by default
     StateSave(*PersistentState)
 }
 
-type MachineState struct {
-    AppliedSince int
-    LastUID uint64
-}
+//type RaftState struct {
+//    LastInclIdx uint64
+//    LastInclTerm uint64
+//    // configuration details
+//}
 
 type Machine interface { // should be already linked with Messenger
-    LogQueue(LogEntry) // queue for apply
-    LastApplied() *MachineState // (# applied since last call, uid)
+    Apply(uid uint64, entry LogEntry) // queue and return (non-blocking)
+    //TakeSnapshot(*RaftState) // should be properly serialized with Apply
+    //LoadSnapshot() *RaftState
 }
 
 func main() {}

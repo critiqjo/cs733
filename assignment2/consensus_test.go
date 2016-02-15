@@ -1,30 +1,46 @@
 package main
 
 import "testing"
+import "math/rand"
+import "time"
 
-type DummyMsgr struct {
+type DummyMsger struct {
     notifch chan<- Message
+    testch chan Message
 }
-func (msgr *DummyMsgr) Register(notifch chan<- Message) {
-    msgr.notifch = notifch
+func (self *DummyMsger) Register(notifch chan<- Message) {
+    self.notifch = notifch
 }
-func (msgr *DummyMsgr) SendAppendEntries(server int, message AppendEntries) {}
-func (msgr *DummyMsgr) BroadcastRequestVote(message RequestVote) {}
-func (msgr *DummyMsgr) RedirectTo(uid uint64, server int) {}
+func (self *DummyMsger) SendAppendEntries(server int, msg *AppendEntries) {}
+func (self *DummyMsger) BroadcastRequestVote(msg *RequestVote) {
+    self.testch <- msg
+}
+func (self *DummyMsger) Client301(uid uint64, server int) {}
+func (self *DummyMsger) Client503(uid uint64) {}
 
-type DummyPstr struct {}
-func (pstr *DummyPstr) LogAppend(RaftLogEntry) {}
-func (pstr *DummyPstr) LogCompact(uint64) {}
-func (pstr *DummyPstr) LogRead() []RaftLogEntry { return nil }
-func (pstr *DummyPstr) StateRead() *PersistentState { return nil }
-func (pstr *DummyPstr) StateSave(ps *PersistentState) {}
+type DummyPster struct {}
+func (pster *DummyPster) LogAppend(RaftLogEntry) {}
+func (pster *DummyPster) LogDiscard(uint64) {}
+func (pster *DummyPster) LogRead() []RaftLogEntry { return nil }
+func (pster *DummyPster) StateRead() *PersistentState { return nil }
+func (pster *DummyPster) StateSave(ps *PersistentState) {}
 
 type DummyMachn struct {}
-func (machn *DummyMachn) LogQueue(LogEntry) {}
-func (machn *DummyMachn) LastApplied() *MachineState { return nil }
+func (machn *DummyMachn) Apply(uid uint64, entry LogEntry) {}
 
 func TestDummy(t *testing.T) {
-    msgr, pstr, machn := &DummyMsgr{ nil }, &DummyPstr{}, &DummyMachn{}
-    raft := NewRaftNode(0, msgr, pstr, machn)
-    raft.Run()
+    assert := func(e bool, args ...interface{}) {
+        if !e {
+            t.Fatal(args...)
+        }
+    }
+
+    msger, pster, machn := &DummyMsger{ nil, make(chan Message) }, &DummyPster{}, &DummyMachn{}
+    raft := NewRaftNode(0, msger, pster, machn)
+    go raft.Run(func() time.Duration {
+        return time.Duration(rand.Int() % 400 + 200) * time.Millisecond
+    })
+
+    m := <-msger.testch // wait for timeout
+    assert(*m.(*RequestVote) == RequestVote { 1, 0, 0, 0 })
 }
