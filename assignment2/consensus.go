@@ -82,7 +82,7 @@ func NewRaftNode(serverId int, msger Messenger, pster Persister, machn Machine) 
             votedFor: votedFor,
             state: follower,
             commitIdx: 0,
-            lastAppld: 0, // TODO init using machn.LoadSnapshot()
+            lastAppld: 0,
             voteCount: 0,
             nextIdx: nil,
             matchIdx: nil,
@@ -278,8 +278,6 @@ type ClientEntry struct {
 type timeout struct {
     version uint64
 }
-
-// TODO configuration change request
 
 type Messenger interface {
     // Must maintain a map from serverIds to (network) address/socket
