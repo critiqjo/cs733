@@ -2,6 +2,9 @@ package main
 
 import "time"
 
+// Note: Raft state machine is a single-threaded event-loop
+//       All events including timeouts are received on a single channel
+
 type rState int
 
 const (
@@ -105,7 +108,6 @@ func (self *RaftNode) Run(timeoutSampler func() time.Duration) {
         case leader:
             self.leaderHandler(msg)
         }
-        break
     }
 }
 
@@ -132,6 +134,7 @@ func (self *RaftNode) followerHandler(m Message) {
                 self.msger.Send(msg.LeaderId, &AppendReply { self.consensus.term, true })
                 if self.consensus.commitIdx < msg.CommitIdx {
                     self.consensus.commitIdx = msg.CommitIdx
+                    // FIXME handle commitIdx > lastIdx ?
                     if self.consensus.lastAppld < self.consensus.commitIdx {
                         from, to := self.consensus.lastAppld + 1, self.consensus.commitIdx + 1
                         clientReqs := make([]ClientEntry, to - from)
@@ -141,7 +144,7 @@ func (self *RaftNode) followerHandler(m Message) {
                         self.machn.ApplyLazy(clientReqs)
                         self.consensus.lastAppld = self.consensus.commitIdx
                     }
-                }
+                } // else if self > msg, panic!
             } else {
                 self.msger.Send(msg.LeaderId, &AppendReply { self.consensus.term, false })
             }
@@ -183,17 +186,39 @@ func (self *RaftNode) followerHandler(m Message) {
 func (self *RaftNode) candidateHandler(m Message) {
     switch msg := m.(type) {
     case *AppendEntries:
-        break
+        if msg.Term < self.consensus.term {
+            self.msger.Send(msg.LeaderId, &AppendReply { self.consensus.term, false })
+        } else {
+            self.consensus.votedFor = msg.LeaderId // just needs to be non-zero
+            self.consensus.state = follower
+            self.followerHandler(msg)
+        }
+
     case *VoteRequest:
         break
+
     case *AppendReply:
         break
+
     case *VoteReply:
         break
+
     case *ClientEntry:
         self.msger.Client503(msg.UID)
+
     case *timeout:
-        if self.timer.Match(msg.version) { break }
+        if self.timer.Match(msg.version) {
+            self.consensus.term += 1
+            // assert self.consensus.votedFor = self.consensus.id
+            lastI := len(self.consensus.log) - 1
+            self.msger.BroadcastVoteRequest(&VoteRequest {
+                self.consensus.term,
+                self.consensus.id,
+                self.consensus.log[lastI].Index,
+                self.consensus.log[lastI].Term,
+            })
+            self.timer.Reset()
+        }
     }
 }
 
