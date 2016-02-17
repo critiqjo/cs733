@@ -48,7 +48,7 @@ func (self *RaftNode) logAppend(off int, entries []ClientEntry) {
     fromIdx := log[from - 1].Index + 1
     log = append(log, make([]RaftEntry, len(entries))...)
     for i, entry := range entries {
-        log[from + i] = RaftEntry { self.consensus.term, fromIdx + uint64(i), &entry }
+        log[from + i] = RaftEntry { fromIdx + uint64(i), self.consensus.term, &entry }
     }
     self.pster.LogAppend(log[from:])
     self.consensus.log = log
@@ -125,7 +125,8 @@ func (self *RaftNode) followerHandler(m Message) {
 
             log := self.consensus.log
             prevIdx := msg.PrevLogIdx
-            prevOff := int(prevIdx - log[0].Index)
+            firstIdx := log[0].Index
+            prevOff := int(prevIdx - firstIdx)
             // assert prevOff >= 0
             if int(prevOff) < len(log) && log[prevOff].Term == msg.PrevLogTerm {
                 if len(msg.Entries) > 0 {
@@ -133,18 +134,22 @@ func (self *RaftNode) followerHandler(m Message) {
                 }
                 self.msger.Send(msg.LeaderId, &AppendReply { self.consensus.term, true })
                 if self.consensus.commitIdx < msg.CommitIdx {
-                    self.consensus.commitIdx = msg.CommitIdx
-                    // FIXME handle commitIdx > lastIdx ?
-                    if self.consensus.lastAppld < self.consensus.commitIdx {
-                        from, to := self.consensus.lastAppld + 1, self.consensus.commitIdx + 1
+                    lastIdx := firstIdx + uint64(len(log) - 1)
+                    pracCommitIdx := msg.CommitIdx
+                    if pracCommitIdx > lastIdx {
+                        pracCommitIdx = lastIdx
+                    }
+                    self.consensus.commitIdx = pracCommitIdx
+                    if self.consensus.lastAppld < pracCommitIdx {
+                        from, to := self.consensus.lastAppld + 1, pracCommitIdx + 1
                         clientReqs := make([]ClientEntry, to - from)
-                        for i := from; i < to; i += 1 {
-                            clientReqs[i - from] = *log[i].Entry // copy?
+                        for idx := from; idx < to; idx += 1 {
+                            clientReqs[idx - from] = *log[idx - firstIdx].Entry // opt?
                         }
                         self.machn.ApplyLazy(clientReqs)
                         self.consensus.lastAppld = self.consensus.commitIdx
                     }
-                } // else if self > msg, panic!
+                } // else don't panic!
             } else {
                 self.msger.Send(msg.LeaderId, &AppendReply { self.consensus.term, false })
             }
@@ -168,17 +173,8 @@ func (self *RaftNode) followerHandler(m Message) {
 
     case *timeout:
         if self.timer.Match(msg.version) {
-            self.consensus.term += 1
-            self.consensus.votedFor = self.consensus.id
             self.consensus.state = candidate
-            lastI := len(self.consensus.log) - 1
-            self.msger.BroadcastVoteRequest(&VoteRequest {
-                self.consensus.term,
-                self.consensus.id,
-                self.consensus.log[lastI].Index,
-                self.consensus.log[lastI].Term,
-            })
-            self.timer.Reset()
+            self.candidateHandler(msg)
         }
     }
 }
@@ -209,7 +205,7 @@ func (self *RaftNode) candidateHandler(m Message) {
     case *timeout:
         if self.timer.Match(msg.version) {
             self.consensus.term += 1
-            // assert self.consensus.votedFor = self.consensus.id
+            self.consensus.votedFor = self.consensus.id
             lastI := len(self.consensus.log) - 1
             self.msger.BroadcastVoteRequest(&VoteRequest {
                 self.consensus.term,
@@ -240,8 +236,8 @@ func (self *RaftNode) leaderHandler(m Message) {
 }
 
 type RaftEntry struct {
+    Index uint64 // redundant, but convinient -- Persister may optimize (also verify)
     Term uint64
-    Index uint64
     Entry *ClientEntry
 }
 
