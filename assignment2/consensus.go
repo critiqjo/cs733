@@ -16,7 +16,7 @@ const N = 5 // number of servers -- should be part of rConsensus once
 type rConsensus struct {
     id int
     // persistent fields
-    log []RaftLogEntry
+    log []RaftEntry
     term uint64
     votedFor int
     // volatile fields
@@ -43,31 +43,31 @@ func (self *RaftNode) logAppend(off int, entries []ClientEntry) {
     log := self.consensus.log
     from := len(log)
     fromIdx := log[from - 1].Index + 1
-    log = append(log, make([]RaftLogEntry, len(entries))...)
+    log = append(log, make([]RaftEntry, len(entries))...)
     for i, entry := range entries {
-        log[from + i] = RaftLogEntry { self.consensus.term, fromIdx + uint64(i), &entry }
+        log[from + i] = RaftEntry { self.consensus.term, fromIdx + uint64(i), &entry }
     }
     self.pster.LogAppend(log[from:])
     self.consensus.log = log
 }
 
 func NewRaftNode(serverId int, msger Messenger, pster Persister, machn Machine) RaftNode {
-    ps := pster.StateRead()
+    rs := pster.StateRead()
     var term uint64
     var votedFor int
-    if ps == nil {
+    if rs == nil {
         term = 0
         votedFor = -1
     } else {
-        term = ps.T
-        votedFor = ps.V
+        term = rs.Term
+        votedFor = rs.VotedFor
     }
     notifch := make(chan Message)
     msger.Register(notifch)
     log := pster.LogRead()
     if log == nil {
         // simplification: to avoid a few checks for empty log
-        log = []RaftLogEntry { RaftLogEntry { 0, 0, nil } }
+        log = []RaftEntry { RaftEntry { 0, 0, nil } }
     }
     return RaftNode {
         msger, pster, machn, notifch, nil,
@@ -113,7 +113,7 @@ func (self *RaftNode) followerHandler(m Message) {
     switch msg := m.(type) {
     case *AppendEntries:
         if msg.Term < self.consensus.term {
-            self.msger.Send(msg.LeaderId, &RequestVoteResp { self.consensus.term, false })
+            self.msger.Send(msg.LeaderId, &VoteReply { self.consensus.term, false })
         } else {
             self.timer.Reset()
             if msg.Term > self.consensus.term {
@@ -129,7 +129,7 @@ func (self *RaftNode) followerHandler(m Message) {
                 if len(msg.Entries) > 0 {
                     self.logAppend(prevOff + 1, msg.Entries)
                 }
-                self.msger.Send(msg.LeaderId, &AppendEntriesResp { self.consensus.term, true })
+                self.msger.Send(msg.LeaderId, &AppendReply { self.consensus.term, true })
                 if self.consensus.commitIdx < msg.CommitIdx {
                     self.consensus.commitIdx = msg.CommitIdx
                     if self.consensus.lastAppld < self.consensus.commitIdx {
@@ -143,17 +143,17 @@ func (self *RaftNode) followerHandler(m Message) {
                     }
                 }
             } else {
-                self.msger.Send(msg.LeaderId, &AppendEntriesResp { self.consensus.term, false })
+                self.msger.Send(msg.LeaderId, &AppendReply { self.consensus.term, false })
             }
         }
 
-    case *RequestVote:
+    case *VoteRequest:
         break
 
-    case *AppendEntriesResp:
+    case *AppendReply:
         break
 
-    case *RequestVoteResp:
+    case *VoteReply:
         break
 
     case *ClientEntry:
@@ -168,12 +168,12 @@ func (self *RaftNode) followerHandler(m Message) {
             self.consensus.term += 1
             self.consensus.votedFor = self.consensus.id
             self.consensus.state = candidate
-            lastIdx := len(self.consensus.log) - 1
-            self.msger.BroadcastRequestVote(&RequestVote {
+            lastI := len(self.consensus.log) - 1
+            self.msger.BroadcastVoteRequest(&VoteRequest {
                 self.consensus.term,
                 self.consensus.id,
-                self.consensus.log[lastIdx].Index,
-                self.consensus.log[lastIdx].Term,
+                self.consensus.log[lastI].Index,
+                self.consensus.log[lastI].Term,
             })
             self.timer.Reset()
         }
@@ -184,11 +184,11 @@ func (self *RaftNode) candidateHandler(m Message) {
     switch msg := m.(type) {
     case *AppendEntries:
         break
-    case *RequestVote:
+    case *VoteRequest:
         break
-    case *AppendEntriesResp:
+    case *AppendReply:
         break
-    case *RequestVoteResp:
+    case *VoteReply:
         break
     case *ClientEntry:
         self.msger.Client503(msg.UID)
@@ -201,11 +201,11 @@ func (self *RaftNode) leaderHandler(m Message) {
     switch msg := m.(type) {
     case *AppendEntries:
         break
-    case *RequestVote:
+    case *VoteRequest:
         break
-    case *AppendEntriesResp:
+    case *AppendReply:
         break
-    case *RequestVoteResp:
+    case *VoteReply:
         break
     case *ClientEntry:
         break
@@ -214,7 +214,7 @@ func (self *RaftNode) leaderHandler(m Message) {
     }
 }
 
-type RaftLogEntry struct {
+type RaftEntry struct {
     Term uint64
     Index uint64
     Entry *ClientEntry
@@ -232,19 +232,19 @@ type AppendEntries struct {
     CommitIdx uint64
 }
 
-type RequestVote struct {
+type VoteRequest struct {
     Term uint64
     CandidId int
     LastLogIdx uint64
     LastLogTerm uint64
 }
 
-type AppendEntriesResp struct {
+type AppendReply struct {
     Term uint64
     Success bool
 }
 
-type RequestVoteResp struct {
+type VoteReply struct {
     Term uint64
     Granted bool
 }
@@ -264,29 +264,30 @@ type Messenger interface {
     // Must maintain a map from serverIds to (network) address/socket
     Register(notifch chan<- Message)
     Send(server int, msg Message)
-    BroadcastRequestVote(msg *RequestVote)
+    BroadcastVoteRequest(msg *VoteRequest)
     Client301(uid uint64, server int) // redirect to another server (possibly the leader)
     Client503(uid uint64) // service temporarily unavailable
 }
 
-type PersistentState struct {
-    T uint64
-    V int
+type RaftState struct {
+    Term uint64
+    VotedFor int
+    // configuration details?
 }
 
 type Persister interface {
-    LogAppend([]RaftLogEntry) // may need to discard entries based on the first index
-    LogRead() []RaftLogEntry
-    //LogReadTail(count int) []RaftLogEntry
-    //LogReadSlice(begIdx uint64, endIdx uint64) []RaftLogEntry // end-exclusive
-    StateRead() *PersistentState // return InitState by default
-    StateSave(*PersistentState)
+    LogAppend([]RaftEntry) // may need to discard entries based on the first index
+    LogRead() []RaftEntry
+    //LogReadTail(count int) []RaftEntry
+    //LogReadSlice(begIdx uint64, endIdx uint64) []RaftEntry // end-exclusive
+    StateRead() *RaftState // return InitState by default
+    StateSave(*RaftState)
 }
 
-//type RaftState struct {
+//type LogState struct {
 //    LastInclIdx uint64
 //    LastInclTerm uint64
-//    // configuration details
+//    // configuration details?
 //}
 
 // should be internally linked with the Messenger object to respond to clients
@@ -300,8 +301,8 @@ type Machine interface {
     // applied or is still in queue
     ApplyLazy([]ClientEntry)
 
-    //TakeSnapshot(*RaftState) // should be properly serialized with Apply
-    //LoadSnapshot() *RaftState
+    //TakeSnapshot(*LogState) // should be properly serialized with Apply
+    //LoadSnapshot() *LogState
     //SerializeSnapshot() ByteStream?
 }
 

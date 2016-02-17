@@ -12,17 +12,17 @@ func (self *DummyMsger) Register(notifch chan<- Message) {
     self.notifch = notifch
 }
 func (self *DummyMsger) Send(server int, msg Message) {}
-func (self *DummyMsger) BroadcastRequestVote(msg *RequestVote) {
+func (self *DummyMsger) BroadcastVoteRequest(msg *VoteRequest) {
     self.testch <- msg
 }
 func (self *DummyMsger) Client301(uid uint64, server int) {}
 func (self *DummyMsger) Client503(uid uint64) {}
 
 type DummyPster struct {}
-func (pster *DummyPster) LogAppend([]RaftLogEntry) {}
-func (pster *DummyPster) LogRead() []RaftLogEntry { return nil }
-func (pster *DummyPster) StateRead() *PersistentState { return nil }
-func (pster *DummyPster) StateSave(ps *PersistentState) {}
+func (pster *DummyPster) LogAppend([]RaftEntry) {}
+func (pster *DummyPster) LogRead() []RaftEntry { return nil }
+func (pster *DummyPster) StateRead() *RaftState { return nil }
+func (pster *DummyPster) StateSave(ps *RaftState) {}
 
 type DummyMachn struct {}
 func (machn *DummyMachn) ApplyLazy(reqs []ClientEntry) {}
@@ -42,5 +42,5 @@ func TestDummy(t *testing.T) {
     })
 
     m := <-msger.testch // wait for timeout
-    assert(*m.(*RequestVote) == RequestVote { 1, 0, 0, 0 })
+    assert(*m.(*VoteRequest) == VoteRequest { 1, 0, 0, 0 })
 }
