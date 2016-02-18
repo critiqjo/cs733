@@ -17,10 +17,10 @@ func (self *DummyMsger) Client503(uid uint64)                  { }
 
 type DummyPster struct { } // {{{
 
-func (pster *DummyPster) LogAppend([]RaftEntry)   { }
+func (pster *DummyPster) LogUpdate([]RaftEntry)   { }
 func (pster *DummyPster) LogRead() []RaftEntry    { return nil }
-func (pster *DummyPster) StateRead() *RaftState   { return nil }
-func (pster *DummyPster) StateSave(ps *RaftState) { }
+func (pster *DummyPster) StatusLoad() *RaftFields { return nil }
+func (pster *DummyPster) StatusSave(RaftFields)   { }
 // }}}
 
 type DummyMachn struct { // {{{
@@ -41,7 +41,7 @@ func TestDummy(t *testing.T) {
     msger := &DummyMsger{ nil, make(chan interface{}) }
     pster, machn := &DummyPster{}, &DummyMachn{ msger }
     raft := NewRaftNode(0, msger, pster, machn)
-    go raft.Run(func() time.Duration {
+    go raft.Run(func(rs RaftState) time.Duration {
         return time.Duration(400) * time.Millisecond
     })
 

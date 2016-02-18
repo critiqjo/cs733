@@ -5,12 +5,12 @@ import "time"
 // Note: Raft state machine is a single-threaded event-loop
 //       All events including timeouts are received on a single channel
 
-type rState int
+type RaftState int
 
 const (
-    follower rState = iota
-    candidate
-    leader
+    Follower RaftState = iota
+    Candidate
+    Leader
 )
 
 const N = 5 // number of servers -- should be part of rConsensus once
@@ -23,7 +23,7 @@ type rConsensus struct {
     term uint64
     votedFor int
     // volatile fields
-    state rState
+    state RaftState
     commitIdx uint64
     lastAppld uint64
     // state-specific fields
@@ -37,29 +37,40 @@ type RaftNode struct {
     pster Persister
     machn Machine
     notifch chan Message
-    timer *ProTimer
+    timer *RaftTimer
     uidIdxMap map[uint64]uint64 // uid -> idx map for entries not yet applied
     consensus rConsensus
+}
+
+func (self *RaftNode) setTermAndVote(term uint64, vote int) {
+    self.consensus.term = term
+    self.consensus.votedFor = vote
+    self.pster.StatusSave(RaftFields { Term: term, VotedFor: vote })
+}
+
+func (self *RaftNode) setVote(vote int) {
+    self.consensus.votedFor = vote
+    self.pster.StatusSave(RaftFields { Term: self.consensus.term, VotedFor: vote })
 }
 
 func (self *RaftNode) logAppend(at int, entries []RaftEntry) {
     log := self.consensus.log
     // assert log[at - 1].Index + 1 == entries[0].Index
     log = append(log[:at], entries...)
-    self.pster.LogAppend(log[at:])
+    self.pster.LogUpdate(log[at:])
     self.consensus.log = log
 }
 
 func NewRaftNode(serverId int, msger Messenger, pster Persister, machn Machine) RaftNode {
-    rs := pster.StateRead()
+    s := pster.StatusLoad()
     var term uint64
     var votedFor int
-    if rs == nil {
+    if s == nil {
         term = 0
         votedFor = -1
     } else {
-        term = rs.Term
-        votedFor = rs.VotedFor
+        term = s.Term
+        votedFor = s.VotedFor
     }
     notifch := make(chan Message)
     msger.Register(notifch)
@@ -76,7 +87,7 @@ func NewRaftNode(serverId int, msger Messenger, pster Persister, machn Machine) 
             log: log,
             term: term,
             votedFor: votedFor,
-            state: follower,
+            state: Follower,
             commitIdx: 0,
             lastAppld: 0,
             voteCount: 0,
@@ -86,22 +97,26 @@ func NewRaftNode(serverId int, msger Messenger, pster Persister, machn Machine) 
     }
 }
 
+func (self *RaftNode) timerReset() {
+    self.timer.Reset(self.consensus.state)
+}
+
 // event loop, waits on notifch, and for timeouts
-func (self *RaftNode) Run(timeoutSampler func() time.Duration) {
-    self.timer = NewProTimer(func(v uint64) func() {
+func (self *RaftNode) Run(timeoutSampler func(RaftState) time.Duration) {
+    self.timer = NewRaftTimer(func(v uint64) func() {
         return func() {
             self.notifch <- &timeout { v }
         }
     }, timeoutSampler)
-    self.timer.Reset()
+    self.timerReset()
     for {
         msg := <-self.notifch
         switch self.consensus.state {
-        case follower:
+        case Follower:
             self.followerHandler(msg)
-        case candidate:
+        case Candidate:
             self.candidateHandler(msg)
-        case leader:
+        case Leader:
             self.leaderHandler(msg)
         }
     }
@@ -113,10 +128,9 @@ func (self *RaftNode) followerHandler(m Message) {
         if msg.Term < self.consensus.term {
             self.msger.Send(msg.LeaderId, &VoteReply { self.consensus.term, false })
         } else {
-            self.timer.Reset()
+            self.timerReset()
             if msg.Term > self.consensus.term {
-                self.consensus.term = msg.Term
-                self.consensus.votedFor = msg.LeaderId // to track leaderId
+                self.setTermAndVote(msg.Term, msg.LeaderId) // to track leaderId
             }
 
             log := self.consensus.log
@@ -169,7 +183,7 @@ func (self *RaftNode) followerHandler(m Message) {
 
     case *timeout:
         if self.timer.Match(msg.version) {
-            self.consensus.state = candidate
+            self.consensus.state = Candidate
             self.candidateHandler(msg)
         }
     }
@@ -181,8 +195,8 @@ func (self *RaftNode) candidateHandler(m Message) {
         if msg.Term < self.consensus.term {
             self.msger.Send(msg.LeaderId, &AppendReply { self.consensus.term, false })
         } else {
-            self.consensus.votedFor = msg.LeaderId // just needs to be non-zero
-            self.consensus.state = follower
+            self.setVote(msg.LeaderId) // just needs to be non-zero
+            self.consensus.state = Follower
             self.followerHandler(msg)
         }
 
@@ -200,8 +214,7 @@ func (self *RaftNode) candidateHandler(m Message) {
 
     case *timeout:
         if self.timer.Match(msg.version) {
-            self.consensus.term += 1
-            self.consensus.votedFor = self.consensus.id
+            self.setTermAndVote(self.consensus.term + 1, self.consensus.id)
             lastI := len(self.consensus.log) - 1
             self.msger.BroadcastVoteRequest(&VoteRequest {
                 self.consensus.term,
@@ -209,7 +222,7 @@ func (self *RaftNode) candidateHandler(m Message) {
                 self.consensus.log[lastI].Index,
                 self.consensus.log[lastI].Term,
             })
-            self.timer.Reset()
+            self.timerReset()
         }
     }
 }
@@ -284,19 +297,19 @@ type Messenger interface {
     Client503(uid uint64) // service temporarily unavailable
 }
 
-type RaftState struct {
+type RaftFields struct {
     Term uint64
     VotedFor int
     // configuration details?
 }
 
 type Persister interface {
-    LogAppend([]RaftEntry) // may need to discard entries based on the first's index
+    LogUpdate([]RaftEntry) // (truncate and) append log entries
     LogRead() []RaftEntry
     //LogReadTail(count int) []RaftEntry
     //LogReadSlice(begIdx uint64, endIdx uint64) []RaftEntry // end-exclusive
-    StateRead() *RaftState // return InitState by default
-    StateSave(*RaftState)
+    StatusLoad() *RaftFields // return InitState by default
+    StatusSave(RaftFields)
 }
 
 //type LogState struct {
