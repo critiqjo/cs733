@@ -13,11 +13,9 @@ const (
     Leader
 )
 
-const N = 5 // number of servers -- should be part of rConsensus once
-            // configuration changes support is implemented
-
 type rConsensus struct {
-    id int
+    id int // server id - need not be in the range of 0..size
+    size int // cluster size - too simplistic to support config. changes?
     // persistent fields
     log []RaftEntry
     term uint64
@@ -61,7 +59,7 @@ func (self *RaftNode) logAppend(at int, entries []RaftEntry) {
     self.consensus.log = log
 }
 
-func NewRaftNode(serverId int, msger Messenger, pster Persister, machn Machine) RaftNode {
+func NewRaftNode(serverId int, clusterSize int, msger Messenger, pster Persister, machn Machine) RaftNode {
     s := pster.StatusLoad()
     var term uint64
     var votedFor int
@@ -84,6 +82,7 @@ func NewRaftNode(serverId int, msger Messenger, pster Persister, machn Machine) 
         make(map[uint64]uint64),
         rConsensus {
             id: serverId,
+            size: clusterSize,
             log: log,
             term: term,
             votedFor: votedFor,
@@ -229,13 +228,34 @@ func (self *RaftNode) candidateHandler(m Message) {
         }
 
     case *VoteRequest:
-        break
+        if msg.Term <= self.consensus.term {
+            self.msger.Send(msg.CandidId, &VoteReply { self.consensus.term, false })
+        } else {
+            self.consensus.state = Follower
+            self.followerHandler(msg)
+            //reset timer?
+        }
 
     case *AppendReply:
         break
 
     case *VoteReply:
-        break
+        if msg.Term == self.consensus.term && msg.Granted {
+            self.consensus.voteCount += 1
+            if self.consensus.voteCount > self.consensus.size / 2 {
+                self.consensus.matchIdx = make([]uint64, self.consensus.size)
+                lastIdx := self.consensus.log[len(self.consensus.log) - 1].Index
+                self.consensus.nextIdx = make([]uint64, self.consensus.size)
+                for i := range self.consensus.nextIdx {
+                    self.consensus.nextIdx[i] = lastIdx
+                }
+                self.consensus.state = Leader
+                self.timerReset()
+            }
+        } else if msg.Term > self.consensus.term {
+            self.setTermAndVote(msg.Term, -1)
+            self.consensus.state = Follower
+        }
 
     case *ClientEntry:
         self.msger.Client503(msg.UID)
@@ -273,7 +293,7 @@ func (self *RaftNode) leaderHandler(m Message) {
 }
 
 type RaftEntry struct {
-    Index uint64 // redundant, but convinient -- Persister may optimize (also verify)
+    Index uint64 // FIXME? redundant (not SPOT), but convinient
     Term uint64
     Entry *ClientEntry
 }

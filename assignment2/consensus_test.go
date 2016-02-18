@@ -39,7 +39,7 @@ func assert(t *testing.T, e bool, args ...interface{}) {
 func TestDummy(t *testing.T) {
     msger := &DummyMsger{ nil, make(chan interface{}) }
     pster, machn := &DummyPster{}, &DummyMachn{ msger }
-    raft := NewRaftNode(0, msger, pster, machn)
+    raft := NewRaftNode(0, 5, msger, pster, machn)
     go raft.Run(func(rs RaftState) time.Duration {
         return time.Duration(400) * time.Millisecond
     })
