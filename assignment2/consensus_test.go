@@ -1,38 +1,35 @@
 package main
 
 import "testing"
-import "math/rand"
 import "time"
 
-type DummyMsger struct {
+type DummyMsger struct { // {{{
     notifch chan<- Message
     testch chan interface{}
 }
-func (self *DummyMsger) Register(notifch chan<- Message) {
-    self.notifch = notifch
-}
-func (self *DummyMsger) Send(server int, msg Message) {
-    self.testch <- msg
-}
-func (self *DummyMsger) BroadcastVoteRequest(msg *VoteRequest) {
-    self.testch <- msg
-}
-func (self *DummyMsger) Client301(uid uint64, server int) {}
-func (self *DummyMsger) Client503(uid uint64) {}
 
-type DummyPster struct {}
-func (pster *DummyPster) LogAppend([]RaftEntry) {}
-func (pster *DummyPster) LogRead() []RaftEntry { return nil }
-func (pster *DummyPster) StateRead() *RaftState { return nil }
-func (pster *DummyPster) StateSave(ps *RaftState) {}
+func (self *DummyMsger) Register(notifch chan<- Message)       { self.notifch = notifch }
+func (self *DummyMsger) Send(server int, msg Message)          { self.testch <- msg }
+func (self *DummyMsger) BroadcastVoteRequest(msg *VoteRequest) { self.testch <- msg }
+func (self *DummyMsger) Client301(uid uint64, server int)      { }
+func (self *DummyMsger) Client503(uid uint64)                  { }
+// }}}
 
-type DummyMachn struct {
+type DummyPster struct { } // {{{
+
+func (pster *DummyPster) LogAppend([]RaftEntry)   { }
+func (pster *DummyPster) LogRead() []RaftEntry    { return nil }
+func (pster *DummyPster) StateRead() *RaftState   { return nil }
+func (pster *DummyPster) StateSave(ps *RaftState) { }
+// }}}
+
+type DummyMachn struct { // {{{
     msger *DummyMsger
 }
-func (self *DummyMachn) ApplyLazy(reqs []ClientEntry) {
-    self.msger.testch <- reqs
-}
+
+func (self *DummyMachn) ApplyLazy(reqs []ClientEntry)  { self.msger.testch <- reqs }
 func (self *DummyMachn) RespondIfSeen(uid uint64) bool { return false }
+// }}}
 
 func TestDummy(t *testing.T) {
     assert := func(e bool, args ...interface{}) {
@@ -45,7 +42,7 @@ func TestDummy(t *testing.T) {
     pster, machn := &DummyPster{}, &DummyMachn{ msger }
     raft := NewRaftNode(0, msger, pster, machn)
     go raft.Run(func() time.Duration {
-        return time.Duration(rand.Int() % 400 + 200) * time.Millisecond
+        return time.Duration(400) * time.Millisecond
     })
 
     var m interface{}
