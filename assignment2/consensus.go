@@ -13,7 +13,7 @@ const (
     Leader
 )
 
-type rConsensus struct {
+type RaftNode struct { // FIXME organize differently?
     id int // server id - need not be in the range of 0..size
     size int // cluster size - too simplistic to support config. changes?
     // persistent fields
@@ -28,35 +28,33 @@ type rConsensus struct {
     voteCount int // candidate
     nextIdx []uint64 // leader
     matchIdx []uint64 // leader
-}
-
-type RaftNode struct {
+    // extras
+    uidIdxMap map[uint64]uint64 // uid -> idx map for entries not yet applied
+    timer *RaftTimer
+    // links
+    notifch chan Message
     msger Messenger
     pster Persister
     machn Machine
-    notifch chan Message
-    timer *RaftTimer
-    uidIdxMap map[uint64]uint64 // uid -> idx map for entries not yet applied
-    consensus rConsensus
 }
 
 func (self *RaftNode) setTermAndVote(term uint64, vote int) {
-    self.consensus.term = term
-    self.consensus.votedFor = vote
+    self.term = term
+    self.votedFor = vote
     self.pster.StatusSave(RaftFields { Term: term, VotedFor: vote })
 }
 
 func (self *RaftNode) setVote(vote int) {
-    self.consensus.votedFor = vote
-    self.pster.StatusSave(RaftFields { Term: self.consensus.term, VotedFor: vote })
+    self.votedFor = vote
+    self.pster.StatusSave(RaftFields { Term: self.term, VotedFor: vote })
 }
 
 func (self *RaftNode) logAppend(at int, entries []RaftEntry) {
-    log := self.consensus.log
+    log := self.log
     // assert log[at - 1].Index + 1 == entries[0].Index
     log = append(log[:at], entries...)
     self.pster.LogUpdate(log[at:])
-    self.consensus.log = log
+    self.log = log
 }
 
 func NewRaftNode(serverId int, clusterSize int, msger Messenger, pster Persister, machn Machine) RaftNode {
@@ -78,26 +76,28 @@ func NewRaftNode(serverId int, clusterSize int, msger Messenger, pster Persister
         log = []RaftEntry { RaftEntry { 0, 0, nil } }
     }
     return RaftNode {
-        msger, pster, machn, notifch, nil,
-        make(map[uint64]uint64),
-        rConsensus {
-            id: serverId,
-            size: clusterSize,
-            log: log,
-            term: term,
-            votedFor: votedFor,
-            state: Follower,
-            commitIdx: 0,
-            lastAppld: 0,
-            voteCount: 0,
-            nextIdx: nil,
-            matchIdx: nil,
-        },
+        id: serverId,
+        size: clusterSize,
+        log: log,
+        term: term,
+        votedFor: votedFor,
+        state: Follower,
+        commitIdx: 0,
+        lastAppld: 0,
+        voteCount: 0,
+        nextIdx: nil,
+        matchIdx: nil,
+        uidIdxMap: make(map[uint64]uint64),
+        timer: nil,
+        notifch: notifch,
+        msger: msger,
+        pster: pster,
+        machn: machn,
     }
 }
 
 func (self *RaftNode) timerReset() {
-    self.timer.Reset(self.consensus.state)
+    self.timer.Reset(self.state)
 }
 
 // event loop, waits on notifch, and for timeouts
@@ -112,7 +112,7 @@ func (self *RaftNode) Run(timeoutSampler func(RaftState) time.Duration) {
 
     for {
         msg := <-self.notifch
-        switch self.consensus.state {
+        switch self.state {
         case Follower:
             self.followerHandler(msg)
         case Candidate:
@@ -124,7 +124,7 @@ func (self *RaftNode) Run(timeoutSampler func(RaftState) time.Duration) {
 }
 
 func (self *RaftNode) isUpToDate(r *VoteRequest) bool {
-    log := self.consensus.log
+    log := self.log
     lastEntry := log[len(log) - 1]
     return r.LastLogTerm > lastEntry.Term || (r.LastLogTerm == lastEntry.Term &&
                                               r.LastLogIdx >= lastEntry.Index)
@@ -133,14 +133,14 @@ func (self *RaftNode) isUpToDate(r *VoteRequest) bool {
 func (self *RaftNode) followerHandler(m Message) {
     switch msg := m.(type) {
     case *AppendEntries:
-        if msg.Term < self.consensus.term {
-            self.msger.Send(msg.LeaderId, &AppendReply { self.consensus.term, false })
+        if msg.Term < self.term {
+            self.msger.Send(msg.LeaderId, &AppendReply { self.term, false })
         } else {
-            if msg.Term > self.consensus.term {
+            if msg.Term > self.term {
                 self.setTermAndVote(msg.Term, msg.LeaderId) // to track leaderId
             }
 
-            log := self.consensus.log
+            log := self.log
             prevIdx := msg.PrevLogIdx
             firstIdx := log[0].Index
             prevOff := int(prevIdx - firstIdx)
@@ -149,16 +149,16 @@ func (self *RaftNode) followerHandler(m Message) {
                 if len(msg.Entries) > 0 {
                     self.logAppend(prevOff + 1, msg.Entries)
                 }
-                self.msger.Send(msg.LeaderId, &AppendReply { self.consensus.term, true })
-                if self.consensus.commitIdx < msg.CommitIdx {
+                self.msger.Send(msg.LeaderId, &AppendReply { self.term, true })
+                if self.commitIdx < msg.CommitIdx {
                     lastIdx := firstIdx + uint64(len(log) - 1)
                     pracCommitIdx := msg.CommitIdx
                     if pracCommitIdx > lastIdx {
                         pracCommitIdx = lastIdx
                     }
-                    self.consensus.commitIdx = pracCommitIdx
-                    if self.consensus.lastAppld < pracCommitIdx {
-                        from, to := self.consensus.lastAppld + 1, pracCommitIdx + 1
+                    self.commitIdx = pracCommitIdx
+                    if self.lastAppld < pracCommitIdx {
+                        from, to := self.lastAppld + 1, pracCommitIdx + 1
                         clientEntries := make([]ClientEntry, to - from)
                         for idx := from; idx < to; idx += 1 {
                             cEntry := log[idx - firstIdx].Entry
@@ -167,30 +167,30 @@ func (self *RaftNode) followerHandler(m Message) {
                             }
                         }
                         self.machn.ApplyLazy(clientEntries)
-                        self.consensus.lastAppld = self.consensus.commitIdx
+                        self.lastAppld = self.commitIdx
                     }
                 } // else don't panic!
             } else {
-                self.msger.Send(msg.LeaderId, &AppendReply { self.consensus.term, false })
+                self.msger.Send(msg.LeaderId, &AppendReply { self.term, false })
             }
             self.timerReset()
         }
 
     case *VoteRequest:
-        if msg.Term < self.consensus.term {
-            self.msger.Send(msg.CandidId, &VoteReply { self.consensus.term, false })
+        if msg.Term < self.term {
+            self.msger.Send(msg.CandidId, &VoteReply { self.term, false })
         } else {
-            if msg.Term > self.consensus.term {
+            if msg.Term > self.term {
                 self.setTermAndVote(msg.Term, -1)
             }
 
-            if self.consensus.votedFor >= 0 {
-                self.msger.Send(msg.CandidId, &VoteReply { self.consensus.term, false })
+            if self.votedFor >= 0 {
+                self.msger.Send(msg.CandidId, &VoteReply { self.term, false })
             } else if !self.isUpToDate(msg) {
-                self.msger.Send(msg.CandidId, &VoteReply { self.consensus.term, false })
+                self.msger.Send(msg.CandidId, &VoteReply { self.term, false })
             } else {
                 self.setVote(msg.CandidId)
-                self.msger.Send(msg.CandidId, &VoteReply { self.consensus.term, true })
+                self.msger.Send(msg.CandidId, &VoteReply { self.term, true })
                 self.timerReset()
             }
         }
@@ -202,15 +202,15 @@ func (self *RaftNode) followerHandler(m Message) {
         break
 
     case *ClientEntry:
-        if self.consensus.votedFor > -1 {
-            self.msger.Client301(msg.UID, self.consensus.votedFor)
+        if self.votedFor > -1 {
+            self.msger.Client301(msg.UID, self.votedFor)
         } else {
             self.msger.Client503(msg.UID)
         }
 
     case *timeout:
         if self.timer.Match(msg.version) {
-            self.consensus.state = Candidate
+            self.state = Candidate
             self.candidateHandler(msg)
         }
     }
@@ -219,19 +219,19 @@ func (self *RaftNode) followerHandler(m Message) {
 func (self *RaftNode) candidateHandler(m Message) {
     switch msg := m.(type) {
     case *AppendEntries:
-        if msg.Term < self.consensus.term {
-            self.msger.Send(msg.LeaderId, &AppendReply { self.consensus.term, false })
+        if msg.Term < self.term {
+            self.msger.Send(msg.LeaderId, &AppendReply { self.term, false })
         } else {
             self.setVote(msg.LeaderId) // just needs to be non-zero
-            self.consensus.state = Follower
+            self.state = Follower
             self.followerHandler(msg)
         }
 
     case *VoteRequest:
-        if msg.Term <= self.consensus.term {
-            self.msger.Send(msg.CandidId, &VoteReply { self.consensus.term, false })
+        if msg.Term <= self.term {
+            self.msger.Send(msg.CandidId, &VoteReply { self.term, false })
         } else {
-            self.consensus.state = Follower
+            self.state = Follower
             self.followerHandler(msg)
             //reset timer?
         }
@@ -240,21 +240,21 @@ func (self *RaftNode) candidateHandler(m Message) {
         break
 
     case *VoteReply:
-        if msg.Term == self.consensus.term && msg.Granted {
-            self.consensus.voteCount += 1
-            if self.consensus.voteCount > self.consensus.size / 2 {
-                self.consensus.matchIdx = make([]uint64, self.consensus.size)
-                lastIdx := self.consensus.log[len(self.consensus.log) - 1].Index
-                self.consensus.nextIdx = make([]uint64, self.consensus.size)
-                for i := range self.consensus.nextIdx {
-                    self.consensus.nextIdx[i] = lastIdx
+        if msg.Term == self.term && msg.Granted {
+            self.voteCount += 1
+            if self.voteCount > self.size / 2 {
+                self.matchIdx = make([]uint64, self.size)
+                lastIdx := self.log[len(self.log) - 1].Index
+                self.nextIdx = make([]uint64, self.size)
+                for i := range self.nextIdx {
+                    self.nextIdx[i] = lastIdx
                 }
-                self.consensus.state = Leader
+                self.state = Leader
                 self.timerReset()
             }
-        } else if msg.Term > self.consensus.term {
+        } else if msg.Term > self.term {
             self.setTermAndVote(msg.Term, -1)
-            self.consensus.state = Follower
+            self.state = Follower
         }
 
     case *ClientEntry:
@@ -262,13 +262,13 @@ func (self *RaftNode) candidateHandler(m Message) {
 
     case *timeout:
         if self.timer.Match(msg.version) {
-            self.setTermAndVote(self.consensus.term + 1, self.consensus.id)
-            lastI := len(self.consensus.log) - 1
+            self.setTermAndVote(self.term + 1, self.id)
+            lastI := len(self.log) - 1
             self.msger.BroadcastVoteRequest(&VoteRequest {
-                self.consensus.term,
-                self.consensus.id,
-                self.consensus.log[lastI].Index,
-                self.consensus.log[lastI].Term,
+                self.term,
+                self.id,
+                self.log[lastI].Index,
+                self.log[lastI].Term,
             })
             self.timerReset()
         }
