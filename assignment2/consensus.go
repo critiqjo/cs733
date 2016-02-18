@@ -42,15 +42,11 @@ type RaftNode struct {
     consensus rConsensus
 }
 
-func (self *RaftNode) logAppend(off int, entries []ClientEntry) {
+func (self *RaftNode) logAppend(at int, entries []RaftEntry) {
     log := self.consensus.log
-    from := len(log)
-    fromIdx := log[from - 1].Index + 1
-    log = append(log, make([]RaftEntry, len(entries))...)
-    for i, entry := range entries {
-        log[from + i] = RaftEntry { fromIdx + uint64(i), self.consensus.term, &entry }
-    }
-    self.pster.LogAppend(log[from:])
+    // assert log[at - 1].Index + 1 == entries[0].Index
+    log = append(log[:at], entries...)
+    self.pster.LogAppend(log[at:])
     self.consensus.log = log
 }
 
@@ -249,7 +245,7 @@ type AppendEntries struct {
     LeaderId int
     PrevLogIdx uint64
     PrevLogTerm uint64
-    Entries []ClientEntry
+    Entries []RaftEntry
     CommitIdx uint64
 }
 
@@ -295,7 +291,7 @@ type RaftState struct {
 }
 
 type Persister interface {
-    LogAppend([]RaftEntry) // may need to discard entries based on the first index
+    LogAppend([]RaftEntry) // may need to discard entries based on the first's index
     LogRead() []RaftEntry
     //LogReadTail(count int) []RaftEntry
     //LogReadSlice(begIdx uint64, endIdx uint64) []RaftEntry // end-exclusive

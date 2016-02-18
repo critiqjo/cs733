@@ -51,7 +51,13 @@ func TestDummy(t *testing.T) {
         LeaderId: 2,
         PrevLogIdx: 0,
         PrevLogTerm: 0,
-        Entries: []ClientEntry { ClientEntry { 23425, nil } },
+        Entries: []RaftEntry {
+            RaftEntry {
+                Index: 1,
+                Term: 1,
+                Entry: &ClientEntry { 23425, nil },
+            },
+        },
         CommitIdx: 0,
     }
     m = <-msger.testch
