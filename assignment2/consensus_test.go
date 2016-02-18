@@ -27,17 +27,16 @@ type DummyMachn struct { // {{{
     msger *DummyMsger
 }
 
-func (self *DummyMachn) ApplyLazy(reqs []ClientEntry)  { self.msger.testch <- reqs }
+func (self *DummyMachn) ApplyLazy(entries []ClientEntry)  { self.msger.testch <- entries }
 func (self *DummyMachn) RespondIfSeen(uid uint64) bool { return false }
 // }}}
 
-func TestDummy(t *testing.T) {
-    assert := func(e bool, args ...interface{}) {
-        if !e {
-            t.Fatal(args...)
-        }
-    }
+func assert(t *testing.T, e bool, args ...interface{}) {
+    // Unidiomatic: https://golang.org/doc/faq#testing_framework
+    if !e { t.Fatal(args...) }
+}
 
+func TestDummy(t *testing.T) {
     msger := &DummyMsger{ nil, make(chan interface{}) }
     pster, machn := &DummyPster{}, &DummyMachn{ msger }
     raft := NewRaftNode(0, msger, pster, machn)
@@ -45,6 +44,11 @@ func TestDummy(t *testing.T) {
         return time.Duration(400) * time.Millisecond
     })
 
+    followerTest(t, &raft, msger)
+    candidateTest(t, &raft, msger)
+}
+
+func followerTest(t *testing.T, raft *RaftNode, msger *DummyMsger) {
     var m interface{}
     msger.notifch <- &AppendEntries {
         Term: 1,
@@ -55,22 +59,56 @@ func TestDummy(t *testing.T) {
             RaftEntry {
                 Index: 1,
                 Term: 1,
-                Entry: &ClientEntry { 23425, nil },
+                Entry: &ClientEntry { 1234, nil },
             },
         },
         CommitIdx: 0,
     }
     m = <-msger.testch
-    assert(*m.(*AppendReply) == AppendReply { 1, true }, "bad append", m)
+    assert(t, *m.(*AppendReply) == AppendReply { 1, true }, "Bad append 1", m)
+    // - - - - - - - - - - - - Ha ha ha ha - - - - - - - - - - - - - - ^^^ - !!
 
+    msger.notifch <- &AppendEntries { // heartbeat
+        Term: 3,
+        LeaderId: 3,
+        PrevLogIdx: 1,
+        PrevLogTerm: 1,
+        Entries: []RaftEntry {
+            RaftEntry {
+                Index: 2,
+                Term: 3,
+                Entry: nil, // nothing to apply
+            },
+        },
+        CommitIdx: 2, // commited till this entry
+    }
+    m = <-msger.testch
+    assert(t, *m.(*AppendReply) == AppendReply { 3, true }, "Bad append 3", m)
+    ces := (<-msger.testch).([]ClientEntry) // apply lazy of uid=1234
+    assert(t, len(ces) == 1 && ces[0] == ClientEntry { 1234, nil }, "Bad apply 1234", ces)
+
+    msger.notifch <- &AppendEntries { // heartbeat of old leader
+        Term: 1,
+        LeaderId: 2,
+        PrevLogIdx: 1,
+        PrevLogTerm: 1,
+        Entries: nil,
+        CommitIdx: 1,
+    }
+    m = <-msger.testch
+    assert(t, *m.(*AppendReply) == AppendReply { 3, false }, "Bad append 3f", m)
+}
+
+func candidateTest(t *testing.T, raft *RaftNode, msger *DummyMsger) {
+    var m interface{}
     m = <-msger.testch // wait for timeout
-    assert(*m.(*VoteRequest) == VoteRequest { 2, 0, 1, 1 }, "bad votereq", m)
+    assert(t, *m.(*VoteRequest) == VoteRequest { 4, 0, 2, 3 }, "Bad votereq 4", m)
 
     m = <-msger.testch // wait for timeout again
-    assert(*m.(*VoteRequest) == VoteRequest { 3, 0, 1, 1 }, "bad votereq", m)
+    assert(t, *m.(*VoteRequest) == VoteRequest { 5, 0, 2, 3 }, "Bad votereq 5", m)
 
     msger.notifch <- &AppendEntries {
-        Term: 3,
+        Term: 5,
         LeaderId: 3,
         PrevLogIdx: 1,
         PrevLogTerm: 1,
@@ -78,7 +116,5 @@ func TestDummy(t *testing.T) {
         CommitIdx: 1,
     }
     m = <-msger.testch
-    assert(*m.(*AppendReply) == AppendReply { 3, true }, "bad append", m)
-    m = <-msger.testch // apply lazy
-    assert(m.([]ClientEntry)[0] == ClientEntry { 23425, nil }, "bad apply", m)
+    assert(t, *m.(*AppendReply) == AppendReply { 5, true }, "Bad append 5", m)
 }

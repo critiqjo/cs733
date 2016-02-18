@@ -108,7 +108,9 @@ func (self *RaftNode) Run(timeoutSampler func(RaftState) time.Duration) {
             self.notifch <- &timeout { v }
         }
     }, timeoutSampler)
+
     self.timerReset()
+
     for {
         msg := <-self.notifch
         switch self.consensus.state {
@@ -122,13 +124,19 @@ func (self *RaftNode) Run(timeoutSampler func(RaftState) time.Duration) {
     }
 }
 
+func (self *RaftNode) isUpToDate(r *VoteRequest) bool {
+    log := self.consensus.log
+    lastEntry := log[len(log) - 1]
+    return r.LastLogTerm > lastEntry.Term || (r.LastLogTerm == lastEntry.Term &&
+                                              r.LastLogIdx >= lastEntry.Index)
+}
+
 func (self *RaftNode) followerHandler(m Message) {
     switch msg := m.(type) {
     case *AppendEntries:
         if msg.Term < self.consensus.term {
-            self.msger.Send(msg.LeaderId, &VoteReply { self.consensus.term, false })
+            self.msger.Send(msg.LeaderId, &AppendReply { self.consensus.term, false })
         } else {
-            self.timerReset()
             if msg.Term > self.consensus.term {
                 self.setTermAndVote(msg.Term, msg.LeaderId) // to track leaderId
             }
@@ -152,21 +160,41 @@ func (self *RaftNode) followerHandler(m Message) {
                     self.consensus.commitIdx = pracCommitIdx
                     if self.consensus.lastAppld < pracCommitIdx {
                         from, to := self.consensus.lastAppld + 1, pracCommitIdx + 1
-                        clientReqs := make([]ClientEntry, to - from)
+                        clientEntries := make([]ClientEntry, to - from)
                         for idx := from; idx < to; idx += 1 {
-                            clientReqs[idx - from] = *log[idx - firstIdx].Entry // opt?
+                            cEntry := log[idx - firstIdx].Entry
+                            if cEntry != nil {
+                                clientEntries[idx - from] = *cEntry
+                            }
                         }
-                        self.machn.ApplyLazy(clientReqs)
+                        self.machn.ApplyLazy(clientEntries)
                         self.consensus.lastAppld = self.consensus.commitIdx
                     }
                 } // else don't panic!
             } else {
                 self.msger.Send(msg.LeaderId, &AppendReply { self.consensus.term, false })
             }
+            self.timerReset()
         }
 
     case *VoteRequest:
-        break
+        if msg.Term < self.consensus.term {
+            self.msger.Send(msg.CandidId, &VoteReply { self.consensus.term, false })
+        } else {
+            if msg.Term > self.consensus.term {
+                self.setTermAndVote(msg.Term, -1)
+            }
+
+            if self.consensus.votedFor >= 0 {
+                self.msger.Send(msg.CandidId, &VoteReply { self.consensus.term, false })
+            } else if !self.isUpToDate(msg) {
+                self.msger.Send(msg.CandidId, &VoteReply { self.consensus.term, false })
+            } else {
+                self.setVote(msg.CandidId)
+                self.msger.Send(msg.CandidId, &VoteReply { self.consensus.term, true })
+                self.timerReset()
+            }
+        }
 
     case *AppendReply:
         break
