@@ -1,20 +1,12 @@
-package main
+package raft
 
 import "time"
 
 // Note: Raft state machine is a single-threaded event-loop
 //       All events including timeouts are received on a single channel
 
-type RaftState int
-
-const (
-    Follower RaftState = iota
-    Candidate
-    Leader
-)
-
 type RaftNode struct { // FIXME organize differently?
-    id int // server id - need not be in the range of 0..size
+    id int // node id - need not be in the range of 0..size
     size int // cluster size - too simplistic to support config. changes?
     // persistent fields
     log []RaftEntry
@@ -38,6 +30,21 @@ type RaftNode struct { // FIXME organize differently?
     machn Machine
 }
 
+func (self *RaftNode) isUpToDate(r *VoteRequest) bool {
+    log := self.log
+    lastEntry := log[len(log) - 1]
+    return r.LastLogTerm > lastEntry.Term || (r.LastLogTerm == lastEntry.Term &&
+                                              r.LastLogIdx >= lastEntry.Index)
+}
+
+func (self *RaftNode) logAppend(at int, entries []RaftEntry) {
+    log := self.log
+    // assert log[at - 1].Index + 1 == entries[0].Index
+    log = append(log[:at], entries...)
+    self.pster.LogUpdate(log[at:])
+    self.log = log
+}
+
 func (self *RaftNode) setTermAndVote(term uint64, vote int) {
     self.term = term
     self.votedFor = vote
@@ -49,15 +56,11 @@ func (self *RaftNode) setVote(vote int) {
     self.pster.StatusSave(RaftFields { Term: self.term, VotedFor: vote })
 }
 
-func (self *RaftNode) logAppend(at int, entries []RaftEntry) {
-    log := self.log
-    // assert log[at - 1].Index + 1 == entries[0].Index
-    log = append(log[:at], entries...)
-    self.pster.LogUpdate(log[at:])
-    self.log = log
+func (self *RaftNode) timerReset() {
+    self.timer.Reset(self.state)
 }
 
-func NewRaftNode(serverId int, clusterSize int, msger Messenger, pster Persister, machn Machine) RaftNode {
+func NewRaftNode(nodeId int, clusterSize int, msger Messenger, pster Persister, machn Machine) RaftNode {
     s := pster.StatusLoad()
     var term uint64
     var votedFor int
@@ -76,7 +79,7 @@ func NewRaftNode(serverId int, clusterSize int, msger Messenger, pster Persister
         log = []RaftEntry { RaftEntry { 0, 0, nil } }
     }
     return RaftNode {
-        id: serverId,
+        id: nodeId,
         size: clusterSize,
         log: log,
         term: term,
@@ -96,11 +99,7 @@ func NewRaftNode(serverId int, clusterSize int, msger Messenger, pster Persister
     }
 }
 
-func (self *RaftNode) timerReset() {
-    self.timer.Reset(self.state)
-}
-
-// event loop, waits on notifch, and for timeouts
+// Run the event loop, waits for messages and timeouts
 func (self *RaftNode) Run(timeoutSampler func(RaftState) time.Duration) {
     self.timer = NewRaftTimer(func(v uint64) func() {
         return func() {
@@ -121,13 +120,6 @@ func (self *RaftNode) Run(timeoutSampler func(RaftState) time.Duration) {
             self.leaderHandler(msg)
         }
     }
-}
-
-func (self *RaftNode) isUpToDate(r *VoteRequest) bool {
-    log := self.log
-    lastEntry := log[len(log) - 1]
-    return r.LastLogTerm > lastEntry.Term || (r.LastLogTerm == lastEntry.Term &&
-                                              r.LastLogIdx >= lastEntry.Index)
 }
 
 func (self *RaftNode) followerHandler(m Message) {
@@ -292,94 +284,7 @@ func (self *RaftNode) leaderHandler(m Message) {
     }
 }
 
-type RaftEntry struct {
-    Index uint64 // FIXME? redundant (not SPOT), but convinient
-    Term uint64
-    Entry *ClientEntry
-}
-
-type Message interface {}
-// either of the 6 structs below
-
-type AppendEntries struct {
-    Term uint64
-    LeaderId int
-    PrevLogIdx uint64
-    PrevLogTerm uint64
-    Entries []RaftEntry
-    CommitIdx uint64
-}
-
-type VoteRequest struct {
-    Term uint64
-    CandidId int
-    LastLogIdx uint64
-    LastLogTerm uint64
-}
-
-type AppendReply struct {
-    Term uint64
-    Success bool
-}
-
-type VoteReply struct {
-    Term uint64
-    Granted bool
-}
-
-type ClientEntry struct {
-    UID uint64
-    Data interface{}
-}
-
+// Technically, just another Message!
 type timeout struct {
     version uint64
 }
-
-type Messenger interface {
-    // Must maintain a map from serverIds to (network) address/socket
-    Register(notifch chan<- Message)
-    Send(server int, msg Message)
-    BroadcastVoteRequest(msg *VoteRequest)
-    Client301(uid uint64, server int) // redirect to another server (possibly the leader)
-    Client503(uid uint64) // service temporarily unavailable
-}
-
-type RaftFields struct {
-    Term uint64
-    VotedFor int
-    // configuration details?
-}
-
-type Persister interface {
-    LogUpdate([]RaftEntry) // (truncate and) append log entries
-    LogRead() []RaftEntry
-    //LogReadTail(count int) []RaftEntry
-    //LogReadSlice(begIdx uint64, endIdx uint64) []RaftEntry // end-exclusive
-    StatusLoad() *RaftFields // return InitState by default
-    StatusSave(RaftFields)
-}
-
-//type LogState struct {
-//    LastInclIdx uint64
-//    LastInclTerm uint64
-//    // configuration details?
-//}
-
-// should be internally linked with the Messenger object to respond to clients
-type Machine interface {
-    // if the request with uid has been processed or queued, then return true,
-    // and respond to the client appropriately
-    RespondIfSeen(uid uint64) bool
-
-    // lazily apply operations; after this call, RespondIfSeen should return
-    // true for all of these uids regardless of whether the operation has been
-    // applied or is still in queue
-    ApplyLazy([]ClientEntry)
-
-    //TakeSnapshot(*LogState) // should be properly serialized with Apply
-    //LoadSnapshot() *LogState
-    //SerializeSnapshot() ByteStream?
-}
-
-func main() {}
