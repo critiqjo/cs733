@@ -41,6 +41,7 @@ type VoteRequest struct {
 type AppendReply struct {
     Term uint64
     Success bool
+    FollowId int
 }
 
 type VoteReply struct {

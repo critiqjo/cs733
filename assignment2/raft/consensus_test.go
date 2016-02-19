@@ -65,8 +65,8 @@ func followerTest(t *testing.T, raft *RaftNode, msger *DummyMsger) {
         CommitIdx: 0,
     }
     m = <-msger.testch
-    assert(t, *m.(*AppendReply) == AppendReply { 1, true }, "Bad append 1", m)
-    // - - - - - - - - - - - - Ha ha ha ha - - - - - - - - - - - - - - ^^^ - !!
+    assert(t, *m.(*AppendReply) == AppendReply { 1, true, 0 }, "Bad append 1", m)
+    // - - - - - - - - - - - - - Ha ha ha ha - - - - - - - - - - - - - - - ^ - !!
 
     msger.notifch <- &AppendEntries {
         Term: 3,
@@ -83,7 +83,7 @@ func followerTest(t *testing.T, raft *RaftNode, msger *DummyMsger) {
         CommitIdx: 2, // commited till this entry
     }
     m = <-msger.testch
-    assert(t, *m.(*AppendReply) == AppendReply { 3, true }, "Bad append 3t.2", m)
+    assert(t, *m.(*AppendReply) == AppendReply { 3, true, 0 }, "Bad append 3t.2", m)
     ces := (<-msger.testch).([]ClientEntry) // apply lazy of uid=1234
     assert(t, len(ces) == 1 && ces[0] == ClientEntry { 1234, nil }, "Bad apply 1234", ces)
 
@@ -96,7 +96,7 @@ func followerTest(t *testing.T, raft *RaftNode, msger *DummyMsger) {
         CommitIdx: 1,
     }
     m = <-msger.testch
-    assert(t, *m.(*AppendReply) == AppendReply { 3, false }, "Bad append 3f", m)
+    assert(t, *m.(*AppendReply) == AppendReply { 3, false, 0 }, "Bad append 3f", m)
 
     msger.notifch <- &AppendEntries {
         Term: 3,
@@ -113,7 +113,7 @@ func followerTest(t *testing.T, raft *RaftNode, msger *DummyMsger) {
         CommitIdx: 2,
     }
     m = <-msger.testch
-    assert(t, *m.(*AppendReply) == AppendReply { 3, true }, "Bad append 3t.3", m)
+    assert(t, *m.(*AppendReply) == AppendReply { 3, true, 0 }, "Bad append 3t.3", m)
     assert(t, raft.log[3].Term == 3, "Bad log 3")
 
     msger.notifch <- &AppendEntries { // overwrite previous entry
@@ -131,7 +131,7 @@ func followerTest(t *testing.T, raft *RaftNode, msger *DummyMsger) {
         CommitIdx: 2,
     }
     m = <-msger.testch
-    assert(t, *m.(*AppendReply) == AppendReply { 4, true }, "Bad append 4t", m)
+    assert(t, *m.(*AppendReply) == AppendReply { 4, true, 0 }, "Bad append 4t", m)
     assert(t, raft.log[3].Term == 4, "Bad log 4")
 }
 
@@ -152,7 +152,7 @@ func candidateTest(t *testing.T, raft *RaftNode, msger *DummyMsger) {
         CommitIdx: 1,
     }
     m = <-msger.testch
-    assert(t, *m.(*AppendReply) == AppendReply { 6, true }, "Bad append 5", m)
+    assert(t, *m.(*AppendReply) == AppendReply { 6, true, 0 }, "Bad append 5", m)
 
     msger.notifch <- &VoteRequest {
         Term: 6,

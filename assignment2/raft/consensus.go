@@ -150,7 +150,7 @@ func (self *RaftNode) followerHandler(m Message) {
     switch msg := m.(type) {
     case *AppendEntries:
         if msg.Term < self.term {
-            self.msger.Send(msg.LeaderId, &AppendReply { self.term, false })
+            self.msger.Send(msg.LeaderId, &AppendReply { self.term, false, self.id })
         } else {
             if msg.Term > self.term {
                 self.setTermAndVote(msg.Term, msg.LeaderId) // to track leaderId
@@ -165,7 +165,7 @@ func (self *RaftNode) followerHandler(m Message) {
                 if len(msg.Entries) > 0 {
                     self.logAppend(prevOff + 1, msg.Entries)
                 }
-                self.msger.Send(msg.LeaderId, &AppendReply { self.term, true })
+                self.msger.Send(msg.LeaderId, &AppendReply { self.term, true, self.id })
                 if self.commitIdx < msg.CommitIdx {
                     lastIdx := firstIdx + uint64(len(log) - 1)
                     pracCommitIdx := msg.CommitIdx
@@ -191,7 +191,7 @@ func (self *RaftNode) followerHandler(m Message) {
                     }
                 } // else don't panic!
             } else {
-                self.msger.Send(msg.LeaderId, &AppendReply { self.term, false })
+                self.msger.Send(msg.LeaderId, &AppendReply { self.term, false, self.id })
             }
             self.timerReset()
         }
@@ -241,7 +241,7 @@ func (self *RaftNode) candidateHandler(m Message) {
     switch msg := m.(type) {
     case *AppendEntries:
         if msg.Term < self.term {
-            self.msger.Send(msg.LeaderId, &AppendReply { self.term, false })
+            self.msger.Send(msg.LeaderId, &AppendReply { self.term, false, self.id })
         } else {
             self.setVote(msg.LeaderId) // just needs to be non-zero
             self.state = Follower
