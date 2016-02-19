@@ -52,12 +52,14 @@ type ClientEntry struct {
     Data interface{}
 }
 
+type ExitLoop struct { }
+
 type Messenger interface {
-    // Must maintain a map from serverIds to (network) address/socket
+    // Must maintain a map from nodeIds to (network) address/socket
     Register(notifch chan<- Message)
-    Send(server int, msg Message)
+    Send(node int, msg Message)
     BroadcastVoteRequest(msg *VoteRequest)
-    Client301(uid uint64, server int) // redirect to another server (possibly the leader)
+    Client301(uid uint64, nodeId int) // redirect to another node (possibly the leader)
     Client503(uid uint64) // service temporarily unavailable
 }
 

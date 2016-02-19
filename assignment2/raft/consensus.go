@@ -1,6 +1,10 @@
 package raft
 
-import "time"
+import (
+    err "log" // avoid confusion
+    "os"
+    "time"
+)
 
 // Note: Raft state machine is a single-threaded event-loop
 //       All events including timeouts are received on a single channel
@@ -28,6 +32,8 @@ type RaftNode struct { // FIXME organize differently?
     msger Messenger
     pster Persister
     machn Machine
+    // error logging
+    err *err.Logger
 }
 
 func (self *RaftNode) isUpToDate(r *VoteRequest) bool {
@@ -71,7 +77,7 @@ func NewRaftNode(nodeId int, clusterSize int, msger Messenger, pster Persister, 
         term = s.Term
         votedFor = s.VotedFor
     }
-    notifch := make(chan Message)
+    notifch := make(chan Message, 64)
     msger.Register(notifch)
     log := pster.LogRead()
     if log == nil {
@@ -80,7 +86,7 @@ func NewRaftNode(nodeId int, clusterSize int, msger Messenger, pster Persister, 
     }
     return RaftNode {
         id: nodeId,
-        size: clusterSize,
+        size: clusterSize, // TODO read from pster
         log: log,
         term: term,
         votedFor: votedFor,
@@ -96,6 +102,7 @@ func NewRaftNode(nodeId int, clusterSize int, msger Messenger, pster Persister, 
         msger: msger,
         pster: pster,
         machn: machn,
+        err: err.New(os.Stderr, "err: ", err.Lshortfile),
     }
 }
 
@@ -109,8 +116,16 @@ func (self *RaftNode) Run(timeoutSampler func(RaftState) time.Duration) {
 
     self.timerReset()
 
+    loop:
     for {
         msg := <-self.notifch
+        switch msg.(type) {
+        case *testEcho:
+            self.msger.Send(self.id, msg)
+            continue loop
+        case *ExitLoop:
+            break loop
+        }
         switch self.state {
         case Follower:
             self.followerHandler(msg)
@@ -152,13 +167,17 @@ func (self *RaftNode) followerHandler(m Message) {
                     if self.lastAppld < pracCommitIdx {
                         from, to := self.lastAppld + 1, pracCommitIdx + 1
                         clientEntries := make([]ClientEntry, to - from)
+                        ci := 0
                         for idx := from; idx < to; idx += 1 {
                             cEntry := log[idx - firstIdx].Entry
                             if cEntry != nil {
-                                clientEntries[idx - from] = *cEntry
+                                clientEntries[ci] = *cEntry
+                                ci += 1
                             }
                         }
-                        self.machn.ApplyLazy(clientEntries)
+                        if ci > 0 {
+                            self.machn.ApplyLazy(clientEntries[:ci])
+                        }
                         self.lastAppld = self.commitIdx
                     }
                 } // else don't panic!
@@ -205,6 +224,9 @@ func (self *RaftNode) followerHandler(m Message) {
             self.state = Candidate
             self.candidateHandler(msg)
         }
+
+    default:
+        self.err.Print("bad type: ", m)
     }
 }
 
@@ -264,6 +286,9 @@ func (self *RaftNode) candidateHandler(m Message) {
             })
             self.timerReset()
         }
+
+    default:
+        self.err.Print("bad type: ", m)
     }
 }
 
@@ -281,6 +306,8 @@ func (self *RaftNode) leaderHandler(m Message) {
         break
     case *timeout:
         if self.timer.Match(msg.version) { break }
+    default:
+        self.err.Print("bad type: ", m)
     }
 }
 
@@ -288,3 +315,6 @@ func (self *RaftNode) leaderHandler(m Message) {
 type timeout struct {
     version uint64
 }
+
+// Yet another Message! For synchronization while testing -- calls Send with own nodeId
+type testEcho struct { }

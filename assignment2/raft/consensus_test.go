@@ -9,10 +9,10 @@ type DummyMsger struct { // {{{
 }
 
 func (self *DummyMsger) Register(notifch chan<- Message)       { self.notifch = notifch }
-func (self *DummyMsger) Send(server int, msg Message)          { self.testch <- msg }
+func (self *DummyMsger) Send(nodeId int, msg Message)          { self.testch <- msg } // `nodeId` is correct! :P
 func (self *DummyMsger) BroadcastVoteRequest(msg *VoteRequest) { self.testch <- msg }
-func (self *DummyMsger) Client301(uid uint64, server int)      { }
-func (self *DummyMsger) Client503(uid uint64)                  { }
+func (self *DummyMsger) Client301(uid uint64, nodeId int)      { } // this is correct too!!
+func (self *DummyMsger) Client503(uid uint64)                  { } // you guessed it!!!
 // }}}
 
 type DummyPster struct { } // {{{
@@ -37,7 +37,7 @@ func assert(t *testing.T, e bool, args ...interface{}) {
 }
 
 func TestDummy(t *testing.T) {
-    msger := &DummyMsger{ nil, make(chan interface{}) }
+    msger := &DummyMsger{ nil, make(chan interface{}) } // unbuffered channel: deliberate strictness
     pster, machn := &DummyPster{}, &DummyMachn{ msger }
     raft := NewRaftNode(0, 5, msger, pster, machn)
     go raft.Run(func(rs RaftState) time.Duration {
@@ -68,7 +68,7 @@ func followerTest(t *testing.T, raft *RaftNode, msger *DummyMsger) {
     assert(t, *m.(*AppendReply) == AppendReply { 1, true }, "Bad append 1", m)
     // - - - - - - - - - - - - Ha ha ha ha - - - - - - - - - - - - - - ^^^ - !!
 
-    msger.notifch <- &AppendEntries { // heartbeat
+    msger.notifch <- &AppendEntries {
         Term: 3,
         LeaderId: 3,
         PrevLogIdx: 1,
@@ -83,7 +83,7 @@ func followerTest(t *testing.T, raft *RaftNode, msger *DummyMsger) {
         CommitIdx: 2, // commited till this entry
     }
     m = <-msger.testch
-    assert(t, *m.(*AppendReply) == AppendReply { 3, true }, "Bad append 3", m)
+    assert(t, *m.(*AppendReply) == AppendReply { 3, true }, "Bad append 3t.2", m)
     ces := (<-msger.testch).([]ClientEntry) // apply lazy of uid=1234
     assert(t, len(ces) == 1 && ces[0] == ClientEntry { 1234, nil }, "Bad apply 1234", ces)
 
@@ -97,24 +97,97 @@ func followerTest(t *testing.T, raft *RaftNode, msger *DummyMsger) {
     }
     m = <-msger.testch
     assert(t, *m.(*AppendReply) == AppendReply { 3, false }, "Bad append 3f", m)
+
+    msger.notifch <- &AppendEntries {
+        Term: 3,
+        LeaderId: 4,
+        PrevLogIdx: 2,
+        PrevLogTerm: 3,
+        Entries: []RaftEntry {
+            RaftEntry {
+                Index: 3,
+                Term: 3,
+                Entry: nil,
+            },
+        },
+        CommitIdx: 2,
+    }
+    m = <-msger.testch
+    assert(t, *m.(*AppendReply) == AppendReply { 3, true }, "Bad append 3t.3", m)
+    assert(t, raft.log[3].Term == 3, "Bad log 3")
+
+    msger.notifch <- &AppendEntries { // overwrite previous entry
+        Term: 4,
+        LeaderId: 3,
+        PrevLogIdx: 2,
+        PrevLogTerm: 3,
+        Entries: []RaftEntry {
+            RaftEntry {
+                Index: 3,
+                Term: 4,
+                Entry: nil,
+            },
+        },
+        CommitIdx: 2,
+    }
+    m = <-msger.testch
+    assert(t, *m.(*AppendReply) == AppendReply { 4, true }, "Bad append 4t", m)
+    assert(t, raft.log[3].Term == 4, "Bad log 4")
 }
 
 func candidateTest(t *testing.T, raft *RaftNode, msger *DummyMsger) {
     var m interface{}
     m = <-msger.testch // wait for timeout
-    assert(t, *m.(*VoteRequest) == VoteRequest { 4, 0, 2, 3 }, "Bad votereq 4", m)
+    assert(t, *m.(*VoteRequest) == VoteRequest { 5, 0, 3, 4 }, "Bad votereq 5", m)
 
     m = <-msger.testch // wait for timeout again
-    assert(t, *m.(*VoteRequest) == VoteRequest { 5, 0, 2, 3 }, "Bad votereq 5", m)
+    assert(t, *m.(*VoteRequest) == VoteRequest { 6, 0, 3, 4 }, "Bad votereq 6", m)
 
     msger.notifch <- &AppendEntries {
-        Term: 5,
+        Term: 6,
         LeaderId: 3,
-        PrevLogIdx: 1,
-        PrevLogTerm: 1,
+        PrevLogIdx: 3,
+        PrevLogTerm: 4,
         Entries: nil,
         CommitIdx: 1,
     }
     m = <-msger.testch
-    assert(t, *m.(*AppendReply) == AppendReply { 5, true }, "Bad append 5", m)
+    assert(t, *m.(*AppendReply) == AppendReply { 6, true }, "Bad append 5", m)
+
+    msger.notifch <- &VoteRequest {
+        Term: 6,
+        CandidId: 1,
+        LastLogIdx: 3,
+        LastLogTerm: 4,
+    }
+    m = <-msger.testch
+    assert(t, *m.(*VoteReply) == VoteReply { 6, false }, "Bad votereply 6", m)
+
+    m = <-msger.testch // wait for timeout one last time!
+    assert(t, *m.(*VoteRequest) == VoteRequest { 7, 0, 3, 4 }, "Bad votereq 6", m)
+
+    vre := &VoteReply {
+        Term: 6, // old term
+        Granted: true,
+    }
+    msger.notifch <- vre
+    msger.notifch <- vre
+    msger.notifch <- vre
+    msger.notifch <- vre
+    msger.notifch <- vre
+    msger.notifch <- &testEcho { }
+    m = <-msger.testch // wait for echo
+    assert(t, raft.state == Candidate, "Bad state 7.1", m)
+
+    vre.Term = 7
+    msger.notifch <- vre
+    msger.notifch <- vre
+    msger.notifch <- &testEcho { }
+    m = <-msger.testch // wait for echo
+    assert(t, raft.state == Candidate, "Bad state 7.2", m)
+    msger.notifch <- vre
+    msger.notifch <- &testEcho { }
+    m = <-msger.testch // wait for echo
+    assert(t, raft.state == Leader, "Bad state 7.3", m)
+    msger.notifch <- &ExitLoop { }
 }
