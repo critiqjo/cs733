@@ -189,5 +189,5 @@ func candidateTest(t *testing.T, raft *RaftNode, msger *DummyMsger) {
     msger.notifch <- &testEcho { }
     m = <-msger.testch // wait for echo
     assert(t, raft.state == Leader, "Bad state 7.3", m)
-    msger.notifch <- &ExitLoop { }
+    raft.Exit()
 }

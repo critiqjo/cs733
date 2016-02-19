@@ -8,6 +8,7 @@ const (
     Leader
 )
 
+// The core stuff:
 // RaftNode struct { ... }
 // func NewRaftNode(nodeId int, clusterSize int, Messenger, Persister, Machine) RaftNode
 // func (self *RaftNode) Run(timeoutSampler func(RaftState) time.Duration)
@@ -19,7 +20,7 @@ type RaftEntry struct {
 }
 
 type Message interface {}
-// either of the 6 structs below
+// either of the 5 structs below
 
 type AppendEntries struct {
     Term uint64
@@ -52,10 +53,11 @@ type ClientEntry struct {
     Data interface{}
 }
 
-type ExitLoop struct { }
-
+// Must maintain a map from serverIds to (network) address/socket
+// Correctness warning: Messenger should never duplicate a message
+//     I.e. it should never send, for instance, an AppendReply twice to a
+//     leader, and get interpreted by the leader as two different requests.
 type Messenger interface {
-    // Must maintain a map from nodeIds to (network) address/socket
     Register(notifch chan<- Message)
     Send(node int, msg Message)
     BroadcastVoteRequest(msg *VoteRequest)

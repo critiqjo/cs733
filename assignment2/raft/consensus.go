@@ -119,13 +119,17 @@ func (self *RaftNode) Run(timeoutSampler func(RaftState) time.Duration) {
     loop:
     for {
         msg := <-self.notifch
-        switch msg.(type) {
-        case *testEcho:
-            self.msger.Send(self.id, msg)
-            continue loop
-        case *ExitLoop:
+
+        switch m := msg.(type) {
+        case *timeout:
+            if !self.timer.Match(m.version) { continue loop }
+        case *exitLoop:
             break loop
+        case *testEcho:
+            self.msger.Send(self.id, m)
+            continue loop
         }
+
         switch self.state {
         case Follower:
             self.followerHandler(msg)
@@ -135,6 +139,11 @@ func (self *RaftNode) Run(timeoutSampler func(RaftState) time.Duration) {
             self.leaderHandler(msg)
         }
     }
+}
+
+// Exit the event loop
+func (self *RaftNode) Exit() {
+    self.notifch <- &exitLoop { }
 }
 
 func (self *RaftNode) followerHandler(m Message) {
@@ -220,10 +229,8 @@ func (self *RaftNode) followerHandler(m Message) {
         }
 
     case *timeout:
-        if self.timer.Match(msg.version) {
-            self.state = Candidate
-            self.candidateHandler(msg)
-        }
+        self.state = Candidate
+        self.candidateHandler(msg)
 
     default:
         self.err.Print("bad type: ", m)
@@ -275,17 +282,15 @@ func (self *RaftNode) candidateHandler(m Message) {
         self.msger.Client503(msg.UID)
 
     case *timeout:
-        if self.timer.Match(msg.version) {
-            self.setTermAndVote(self.term + 1, self.id)
-            lastI := len(self.log) - 1
-            self.msger.BroadcastVoteRequest(&VoteRequest {
-                self.term,
-                self.id,
-                self.log[lastI].Index,
-                self.log[lastI].Term,
-            })
-            self.timerReset()
-        }
+        self.setTermAndVote(self.term + 1, self.id)
+        lastI := len(self.log) - 1
+        self.msger.BroadcastVoteRequest(&VoteRequest {
+            self.term,
+            self.id,
+            self.log[lastI].Index,
+            self.log[lastI].Term,
+        })
+        self.timerReset()
 
     default:
         self.err.Print("bad type: ", m)
@@ -293,7 +298,7 @@ func (self *RaftNode) candidateHandler(m Message) {
 }
 
 func (self *RaftNode) leaderHandler(m Message) {
-    switch msg := m.(type) {
+    switch m.(type) {
     case *AppendEntries:
         break
     case *VoteRequest:
@@ -305,16 +310,13 @@ func (self *RaftNode) leaderHandler(m Message) {
     case *ClientEntry:
         break
     case *timeout:
-        if self.timer.Match(msg.version) { break }
+        break
     default:
         self.err.Print("bad type: ", m)
     }
 }
 
-// Technically, just another Message!
-type timeout struct {
-    version uint64
-}
-
-// Yet another Message! For synchronization while testing -- calls Send with own nodeId
+// 3 internal Message-s
+type timeout struct { version uint64 }
+type exitLoop struct { }
 type testEcho struct { }
