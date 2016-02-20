@@ -67,7 +67,10 @@ func (self *RaftNode) timerReset() {
     self.timer.Reset(self.state)
 }
 
-func NewRaftNode(nodeId int, clusterSize int, msger Messenger, pster Persister, machn Machine) RaftNode {
+func NewRaftNode(
+    nodeId, clusterSize, notifbuf int,
+    msger Messenger, pster Persister, machn Machine,
+) *RaftNode {
     s := pster.StatusLoad()
     var term uint64
     var votedFor int
@@ -78,14 +81,14 @@ func NewRaftNode(nodeId int, clusterSize int, msger Messenger, pster Persister, 
         term = s.Term
         votedFor = s.VotedFor
     }
-    notifch := make(chan Message, 64)
+    notifch := make(chan Message, notifbuf)
     msger.Register(notifch)
     log := pster.LogRead()
     if log == nil {
         // simplification: to avoid a few checks for empty log
         log = []RaftEntry { RaftEntry { 0, 0, nil } }
     }
-    return RaftNode {
+    return &RaftNode {
         id: nodeId,
         size: clusterSize, // TODO read from pster
         log: log,
@@ -277,7 +280,6 @@ func (self *RaftNode) candidateHandler(m Message) {
     case *VoteReply:
         if msg.Term == self.term && msg.Granted {
             self.voteSet[msg.NodeId] = true
-            self.err.Print(self.voteSet)
             if len(self.voteSet) > self.size / 2 {
                 self.matchIdx = make([]uint64, self.size)
                 lastIdx := self.log[len(self.log) - 1].Index

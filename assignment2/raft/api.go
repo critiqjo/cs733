@@ -10,8 +10,9 @@ const (
 
 // The core stuff:
 // RaftNode struct { ... }
-// func NewRaftNode(nodeId int, clusterSize int, Messenger, Persister, Machine) RaftNode
+// func NewRaftNode(nodeId, clusterSize, notifbuf, Messenger, Persister, Machine) *RaftNode
 // func (self *RaftNode) Run(timeoutSampler func(RaftState) time.Duration)
+// func (self *RaftNode) Exit()
 
 type RaftEntry struct {
     Index uint64 // FIXME? redundant (not SPOT), but convinient
