@@ -41,12 +41,14 @@ type VoteRequest struct {
 type AppendReply struct {
     Term uint64
     Success bool
-    FollowId int
+    NodeId int
+    LastModIdx uint64
 }
 
 type VoteReply struct {
     Term uint64
     Granted bool
+    NodeId int
 }
 
 type ClientEntry struct {
@@ -55,9 +57,6 @@ type ClientEntry struct {
 }
 
 // Must maintain a map from serverIds to (network) address/socket
-// Correctness warning: Messenger should never duplicate a message
-//     I.e. it should never send, for instance, an AppendReply twice to a
-//     leader, and get interpreted by the leader as two different requests.
 type Messenger interface {
     Register(notifch chan<- Message)
     Send(node int, msg Message)
