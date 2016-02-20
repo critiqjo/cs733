@@ -284,10 +284,10 @@ func (self *RaftNode) candidateHandler(m Message) {
                 lastIdx := self.log[len(self.log) - 1].Index
                 self.nextIdx = make([]uint64, self.size)
                 for i := range self.nextIdx {
-                    self.nextIdx[i] = lastIdx
+                    self.nextIdx[i] = lastIdx + 1
                 }
                 self.state = Leader
-                self.timerReset()
+                self.leaderHandler(&timeout { 0 })
             }
         } else if msg.Term > self.term {
             self.setTermAndVote(msg.Term, -1)
@@ -333,7 +333,8 @@ func (self *RaftNode) leaderHandler(m Message) {
         if self.machn.RespondIfSeen(msg.UID) {
             break
         } else if logIdx, ok := self.uidIdxMap[msg.UID]; ok {
-            i := int(logIdx - self.log[0].Index)
+            firstIdx := self.log[0].Index
+            i := int(logIdx - firstIdx)
             if self.log[i].Entry.UID == msg.UID {
                 break
             } else {
@@ -349,6 +350,7 @@ func (self *RaftNode) leaderHandler(m Message) {
         })
         self.uidIdxMap[msg.UID] = newIdx
         for nodeId := range self.nextIdx {
+            if nodeId == self.id { continue }
             nextIdx := self.nextIdx[nodeId]
             if nextIdx == newIdx {
                 self.msger.Send(nodeId, &AppendEntries {
@@ -363,7 +365,20 @@ func (self *RaftNode) leaderHandler(m Message) {
         }
 
     case *timeout:
-        break
+        for nodeId := range self.nextIdx {
+            if nodeId == self.id { continue }
+            firstIdx := self.log[0].Index
+            prevIdx := self.nextIdx[nodeId] - 1
+            self.msger.Send(nodeId, &AppendEntries {
+                Term: self.term,
+                LeaderId: self.id,
+                PrevLogIdx: prevIdx,
+                PrevLogTerm: self.log[prevIdx - firstIdx].Term,
+                Entries: nil,
+                CommitIdx: self.commitIdx,
+            })
+        }
+        self.timerReset()
 
     default:
         self.err.Print("bad type: ", m)

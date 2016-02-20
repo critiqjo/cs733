@@ -2,6 +2,7 @@ package raft
 
 import "testing"
 import "time"
+import "reflect"
 
 type DummyMsger struct { // {{{
     notifch chan<- Message
@@ -143,7 +144,12 @@ func TestCandidate(t *testing.T) {
     assert(t, *m.(*AppendReply) == AppendReply { 4, true, 0, 3 }, "Bad append 4.2", m)
 
     m = <-msger.testch // wait for timeout
-    assert(t, *m.(*VoteRequest) == VoteRequest { 5, 0, 3, 4 }, "Bad votereq 5", m)
+    assert(t, *m.(*VoteRequest) == VoteRequest {
+        Term: 5,
+        CandidId: 0,
+        LastLogIdx: 3,
+        LastLogTerm: 4,
+    }, "Bad votereq 5", m)
 
     m = <-msger.testch // wait for timeout again
     assert(t, *m.(*VoteRequest) == VoteRequest { 6, 0, 3, 4 }, "Bad votereq 6", m)
@@ -159,12 +165,7 @@ func TestCandidate(t *testing.T) {
     m = <-msger.testch
     assert(t, *m.(*AppendReply) == AppendReply { 6, true, 0, 0 }, "Bad append 5", m)
 
-    msger.notifch <- &VoteRequest {
-        Term: 6,
-        CandidId: 1,
-        LastLogIdx: 3,
-        LastLogTerm: 4,
-    }
+    msger.notifch <- &VoteRequest { 6, 1, 3, 4 }
     m = <-msger.testch
     assert(t, *m.(*VoteReply) == VoteReply { 6, false, 0 }, "Bad votereply 6", m)
 
@@ -182,15 +183,29 @@ func TestCandidate(t *testing.T) {
     msger.notifch <- &testEcho { }
     m = <-msger.testch // wait for echo
     assert(t, raft.state == Candidate, "Bad state 7.1", m)
+    raft.Exit()
+}
 
-    msger.notifch <- &VoteReply { 7, true, 2 }
-    msger.notifch <- &VoteReply { 7, true, 3 }
+func TestLeader(t *testing.T) {
+    raft, msger, _, _ := initTest()
+    var m interface{}
+
+    m = <-msger.testch // wait for timeout
+    assert(t, *m.(*VoteRequest) == VoteRequest { 1, 0, 0, 0 }, "Bad votereq 1", m)
+
+    msger.notifch <- &VoteReply { 1, true, 2 }
+    msger.notifch <- &VoteReply { 1, true, 3 }
     msger.notifch <- &testEcho { }
     m = <-msger.testch
-    assert(t, raft.state == Candidate, "Bad state 7.2", m)
-    msger.notifch <- &VoteReply { 7, true, 4 }
-    msger.notifch <- &testEcho { }
+    assert(t, raft.state == Candidate, "Bad state 1.1", m)
+
+    msger.notifch <- &VoteReply { 1, true, 4 }
+    heartbeat := &AppendEntries { 1, 0, 0, 0, nil, 0 }
     m = <-msger.testch
-    assert(t, raft.state == Leader, "Bad state 7.3", m)
+    assert(t, raft.state == Leader, "Bad state 1.2", m)
+    assert(t, reflect.DeepEqual(m, heartbeat), "Bad timeout 1.1", m)
+    m = <-msger.testch
+    m = <-msger.testch
+    m = <-msger.testch
     raft.Exit()
 }
