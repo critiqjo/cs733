@@ -24,13 +24,13 @@ Fields: `uid`, `term`, `index`, `data`
 
 Fields: `term`, `leaderId`, `prevLogIndex`, `prevLogTerm`, `entries[]`, `commitIndex`
 
-Response fields: `term`, `success`
+Response fields: `term`, `success`, `nodeId`, `modLogIndex`
 
 #### RequestVote
 
 Fields: `term`, `candidateId`, `lastLogIndex`, `lastLogTerm`
 
-Response fields: `term`, `granted`
+Response fields: `term`, `granted`, `nodeId`
 
 ### State- and event-wise response algorithm
 
@@ -63,7 +63,7 @@ Reset timer on each event.
   currentTerm += 1
   votedFor = myId
   change state to Candidate
-  broadcast RequestVote to all servers
+  broadcast RequestVote to all nodes
   ```
 
 * On `AppendEntries` RPC
@@ -133,7 +133,7 @@ Reset timer on each event.
   // check for outdated timer event?
   currentTerm += 1
   votedFor = myId
-  broadcast RequestVote to all servers
+  broadcast RequestVote to all nodes
   reset timer
   ```
 
@@ -177,6 +177,7 @@ Reset timer on each event.
   reset timer
   if response.term == currentTerm && response.granted
       voteCount += 1
+      // caveat: possibility of duplicate messages
       if voteCount has reached a strict majority
           change state to Leader
           matchIndex[] = [0 ...]
@@ -198,16 +199,16 @@ Reset timer on each event.
       ask the state machine to respond to the client with appropriate result
   else
       append request.entry to log with current term and next index
-      broadcast the entry to up-to-date servers
+      broadcast the entry to up-to-date nodes
   endif
   ```
 
 * On timeout
 
   ```
-  broadcast heartbeat
-  for server sId, prevLogIndex = nextIndex[sId] - 1,
-             and  prevLogTerm = log[nextIndex[sId] - 1].term
+  broadcast heartbeat such that for node with id nodeId:
+      prevLogIndex = nextIndex[nodeId] - 1,
+      prevLogTerm = log[nextIndex[nodeId] - 1].term
   reset timer
   ```
 
@@ -229,7 +230,7 @@ Reset timer on each event.
   ```
   // Somewhat handwave-y pseudocode ahead!
 
-  sId = response.serverId // local variable
+  nodeId = response.nodeId // local variable
   if response.success == true
       if a new log entry of the current term got replicated to a majority
           commitIndex = index of latest majority replicated log
@@ -238,26 +239,27 @@ Reset timer on each event.
           // client handler could use uid to identify the client connection
       endif
 
-      matchIndex[sId] = nextIndex[sId] - 1
-      if nextIndex[sId] <= log[-1].index
-          pick a number, C: 1 <= C <= log[-1].index + 1 - nextIndex[sId]
-          send C log entries starting from index nextIndex[sId] to sId (in a single RPC)
-          nextIndex[sId] += C
+      if response.modLogIndex > 0
+          matchIndex[nodeId] = response.modLogIndex
+          if nextIndex[nodeId] <= log[-1].index
+              send a few, say C, log entries to nodeId (in a single RPC)
+              nextIndex[nodeId] += C
+          endif
       endif
   else if response.term == currentTerm
       // log mismatch? would matchIndex be non-zero?
       // sent packet gets dropped - next heartbeat will mismatch
-      if nextIndex[sId] > matchIndex[sId] + 1
-          nextIndex[sId] -= 1
+      if nextIndex[nodeId] > matchIndex[nodeId] + 1
+          nextIndex[nodeId] -= 1
       endif
-      send a heart beat or a log (if small?)
+      send a heart beat with updated prevIndex and prevTerm
   else if response.term > currentTerm
       change state to Follower
       reset timer
       votedFor = -1
       currentTerm = response.term
   else
-      // drop! (misbehaving server?)
+      // drop! (misbehaving node?)
   endif
   ```
 
