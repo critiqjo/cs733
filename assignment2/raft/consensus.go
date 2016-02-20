@@ -136,6 +136,30 @@ func (self *RaftNode) logAppend(at int, entries []RaftEntry) uint64 {
     return log[len(log) - 1].Index
 }
 
+func (self *RaftNode) sendAppendEntries(nodeId, num_entries int) {
+    firstIdx := self.log[0].Index
+    nextIdx := self.nextIdx[nodeId]
+    fromI := int(nextIdx - firstIdx)
+    tillI := fromI + num_entries
+    if tillI > len(self.log) {
+        tillI = len(self.log)
+    }
+    var slice []RaftEntry = nil
+    if fromI < tillI {
+        // Gonote: nil != empty slice
+        slice = self.log[fromI:tillI]
+    }
+    self.msger.Send(nodeId, &AppendEntries {
+        Term: self.term,
+        LeaderId: self.id,
+        PrevLogIdx: nextIdx - 1,
+        PrevLogTerm: self.log[fromI - 1].Term,
+        Entries: slice,
+        CommitIdx: self.commitIdx,
+    })
+    self.nextIdx[nodeId] += uint64(tillI - fromI)
+}
+
 func (self *RaftNode) setTermAndVote(term uint64, vote int) {
     self.term = term
     self.votedFor = vote
@@ -149,6 +173,10 @@ func (self *RaftNode) setVote(vote int) {
 
 func (self *RaftNode) timerReset() {
     self.timer.Reset(self.state)
+}
+
+func (self *RaftNode) updateCommitIdx() {
+    // TODO
 }
 
 func (self *RaftNode) followerHandler(m Message) { // {{{1
@@ -171,6 +199,7 @@ func (self *RaftNode) followerHandler(m Message) { // {{{1
             if int(prevOff) < len(log) && log[prevOff].Term == msg.PrevLogTerm {
                 var lastModIdx uint64 = 0
                 if len(msg.Entries) > 0 {
+                    // Gonote: len(nil) is zero (if nil is of slice type)
                     lastModIdx = self.logAppend(prevOff + 1, msg.Entries)
                 }
                 self.msger.Send(msg.LeaderId, &AppendReply {
@@ -316,6 +345,7 @@ func (self *RaftNode) candidateHandler(m Message) { // {{{1
 }
 
 func (self *RaftNode) leaderHandler(m Message) { // {{{1
+    // FIXME too many AppendEntries! coordinate heartbeats with non-heartbeats
     switch msg := m.(type) {
     case *AppendEntries:
         // assert self.term != msg.Term
@@ -325,7 +355,36 @@ func (self *RaftNode) leaderHandler(m Message) { // {{{1
         self.candidateHandler(msg)
 
     case *AppendReply:
-        break
+        nodeId := msg.NodeId
+        if msg.Success == true {
+            firstIdx := self.log[0].Index
+            lastI := len(self.log) - 1
+            if msg.LastModIdx > 0 {
+                self.matchIdx[nodeId] = msg.LastModIdx // assert monotonicity?
+                self.updateCommitIdx()
+                if self.commitIdx > self.lastAppld {
+                    fromI := int(self.lastAppld - firstIdx) + 1
+                    tillI := int(self.commitIdx - firstIdx) + 1
+                    ces := make([]ClientEntry, tillI - fromI)
+                    for i := range ces {
+                        ces[i] = *self.log[fromI + i].Entry
+                    }
+                    self.machn.ApplyLazy(ces)
+                }
+            }
+            if self.nextIdx[nodeId] <= self.log[lastI].Index {
+                self.sendAppendEntries(nodeId, 8)
+            }
+        } else if msg.Term == self.term { // log mismatch
+            if self.nextIdx[nodeId] > self.matchIdx[nodeId] + 1 {
+                self.nextIdx[nodeId] -= 1
+            }
+            self.sendAppendEntries(nodeId, 0)
+        } else if msg.Term > self.term {
+            self.setTermAndVote(msg.Term, -1)
+            self.state = Follower
+            self.timerReset()
+        } // else outdated message?
 
     case *VoteReply:
         break
@@ -354,30 +413,14 @@ func (self *RaftNode) leaderHandler(m Message) { // {{{1
             if nodeId == self.id { continue }
             nextIdx := self.nextIdx[nodeId]
             if nextIdx == newIdx {
-                self.msger.Send(nodeId, &AppendEntries {
-                    Term: self.term,
-                    LeaderId: self.id,
-                    PrevLogIdx: nextIdx - 1,
-                    PrevLogTerm: self.log[lastI].Term,
-                    Entries: self.log[lastI:],
-                    CommitIdx: self.commitIdx,
-                })
+                self.sendAppendEntries(nodeId, 1)
             }
         }
 
     case *timeout:
         for nodeId := range self.nextIdx {
             if nodeId == self.id { continue }
-            firstIdx := self.log[0].Index
-            prevIdx := self.nextIdx[nodeId] - 1
-            self.msger.Send(nodeId, &AppendEntries {
-                Term: self.term,
-                LeaderId: self.id,
-                PrevLogIdx: prevIdx,
-                PrevLogTerm: self.log[prevIdx - firstIdx].Term,
-                Entries: nil,
-                CommitIdx: self.commitIdx,
-            })
+            self.sendAppendEntries(nodeId, 0)
         }
         self.timerReset()
 
