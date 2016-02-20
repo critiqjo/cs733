@@ -167,7 +167,6 @@ func (self *RaftNode) followerHandler(m Message) {
             prevIdx := msg.PrevLogIdx
             firstIdx := log[0].Index
             prevOff := int(prevIdx - firstIdx)
-            // assert prevOff >= 0
             if int(prevOff) < len(log) && log[prevOff].Term == msg.PrevLogTerm {
                 var lastModIdx uint64 = 0
                 if len(msg.Entries) > 0 {
@@ -316,19 +315,56 @@ func (self *RaftNode) candidateHandler(m Message) {
 }
 
 func (self *RaftNode) leaderHandler(m Message) {
-    switch m.(type) {
+    switch msg := m.(type) {
     case *AppendEntries:
-        break
+        // assert self.term != msg.Term
+        self.candidateHandler(msg)
+
     case *VoteRequest:
-        break
+        self.candidateHandler(msg)
+
     case *AppendReply:
         break
+
     case *VoteReply:
         break
+
     case *ClientEntry:
-        break
+        if self.machn.RespondIfSeen(msg.UID) {
+            break
+        } else if logIdx, ok := self.uidIdxMap[msg.UID]; ok {
+            i := int(logIdx - self.log[0].Index)
+            if self.log[i].Entry.UID == msg.UID {
+                break
+            } else {
+                delete(self.uidIdxMap, msg.UID)
+            }
+        }
+        lastI := len(self.log) - 1
+        newIdx := self.log[lastI].Index + 1
+        self.log = append(self.log, RaftEntry {
+            Index: newIdx,
+            Term: self.term,
+            Entry: msg,
+        })
+        self.uidIdxMap[msg.UID] = newIdx
+        for nodeId := range self.nextIdx {
+            nextIdx := self.nextIdx[nodeId]
+            if nextIdx == newIdx {
+                self.msger.Send(nodeId, &AppendEntries {
+                    Term: self.term,
+                    LeaderId: self.id,
+                    PrevLogIdx: nextIdx - 1,
+                    PrevLogTerm: self.log[lastI].Term,
+                    Entries: self.log[lastI:],
+                    CommitIdx: self.commitIdx,
+                })
+            }
+        }
+
     case *timeout:
         break
+
     default:
         self.err.Print("bad type: ", m)
     }
