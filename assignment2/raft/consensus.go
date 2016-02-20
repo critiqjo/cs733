@@ -36,38 +36,7 @@ type RaftNode struct { // FIXME organize differently?
     err *err.Logger
 }
 
-func (self *RaftNode) isUpToDate(r *VoteRequest) bool {
-    log := self.log
-    lastEntry := log[len(log) - 1]
-    return r.LastLogTerm > lastEntry.Term || (r.LastLogTerm == lastEntry.Term &&
-                                              r.LastLogIdx >= lastEntry.Index)
-}
-
-func (self *RaftNode) logAppend(at int, entries []RaftEntry) uint64 {
-    log := self.log
-    // assert log[at - 1].Index + 1 == entries[0].Index
-    log = append(log[:at], entries...)
-    self.pster.LogUpdate(log[at:])
-    self.log = log
-    return log[len(log) - 1].Index
-}
-
-func (self *RaftNode) setTermAndVote(term uint64, vote int) {
-    self.term = term
-    self.votedFor = vote
-    self.pster.StatusSave(RaftFields { Term: term, VotedFor: vote })
-}
-
-func (self *RaftNode) setVote(vote int) {
-    self.votedFor = vote
-    self.pster.StatusSave(RaftFields { Term: self.term, VotedFor: vote })
-}
-
-func (self *RaftNode) timerReset() {
-    self.timer.Reset(self.state)
-}
-
-func NewNode(
+func NewNode( // {{{1
     nodeId, clusterSize, notifbuf int,
     msger Messenger, pster Persister, machn Machine,
 ) *RaftNode {
@@ -111,7 +80,7 @@ func NewNode(
 }
 
 // Run the event loop, waits for messages and timeouts
-func (self *RaftNode) Run(timeoutSampler func(RaftState) time.Duration) {
+func (self *RaftNode) Run(timeoutSampler func(RaftState) time.Duration) { // {{{1
     self.timer = NewRaftTimer(func(v uint64) func() {
         return func() {
             self.notifch <- &timeout { v }
@@ -146,11 +115,43 @@ func (self *RaftNode) Run(timeoutSampler func(RaftState) time.Duration) {
 }
 
 // Exit the event loop
-func (self *RaftNode) Exit() {
+func (self *RaftNode) Exit() { // {{{1
     self.notifch <- &exitLoop { }
 }
 
-func (self *RaftNode) followerHandler(m Message) {
+// ---- private utility methods {{{1
+func (self *RaftNode) isUpToDate(r *VoteRequest) bool {
+    log := self.log
+    lastEntry := log[len(log) - 1]
+    return r.LastLogTerm > lastEntry.Term || (r.LastLogTerm == lastEntry.Term &&
+                                              r.LastLogIdx >= lastEntry.Index)
+}
+
+func (self *RaftNode) logAppend(at int, entries []RaftEntry) uint64 {
+    log := self.log
+    // assert log[at - 1].Index + 1 == entries[0].Index
+    log = append(log[:at], entries...)
+    self.pster.LogUpdate(log[at:])
+    self.log = log
+    return log[len(log) - 1].Index
+}
+
+func (self *RaftNode) setTermAndVote(term uint64, vote int) {
+    self.term = term
+    self.votedFor = vote
+    self.pster.StatusSave(RaftFields { Term: term, VotedFor: vote })
+}
+
+func (self *RaftNode) setVote(vote int) {
+    self.votedFor = vote
+    self.pster.StatusSave(RaftFields { Term: self.term, VotedFor: vote })
+}
+
+func (self *RaftNode) timerReset() {
+    self.timer.Reset(self.state)
+}
+
+func (self *RaftNode) followerHandler(m Message) { // {{{1
     switch msg := m.(type) {
     case *AppendEntries:
         if msg.Term < self.term {
@@ -250,7 +251,7 @@ func (self *RaftNode) followerHandler(m Message) {
     }
 }
 
-func (self *RaftNode) candidateHandler(m Message) {
+func (self *RaftNode) candidateHandler(m Message) { // {{{1
     switch msg := m.(type) {
     case *AppendEntries:
         if msg.Term < self.term {
@@ -314,7 +315,7 @@ func (self *RaftNode) candidateHandler(m Message) {
     }
 }
 
-func (self *RaftNode) leaderHandler(m Message) {
+func (self *RaftNode) leaderHandler(m Message) { // {{{1
     switch msg := m.(type) {
     case *AppendEntries:
         // assert self.term != msg.Term
@@ -385,7 +386,7 @@ func (self *RaftNode) leaderHandler(m Message) {
     }
 }
 
-// 3 internal Message-s
+// ---- internal Message-s {{{1
 type timeout struct { version uint64 }
 type exitLoop struct { }
 type testEcho struct { }

@@ -8,12 +8,6 @@ const (
     Leader
 )
 
-// The core stuff:
-// RaftNode struct { ... }
-// func NewRaftNode(nodeId, clusterSize, notifbuf, Messenger, Persister, Machine) *RaftNode
-// func (self *RaftNode) Run(timeoutSampler func(RaftState) time.Duration)
-// func (self *RaftNode) Exit()
-
 type RaftEntry struct {
     Index uint64 // FIXME? redundant (not SPOT), but convinient
     Term uint64
@@ -32,13 +26,6 @@ type AppendEntries struct {
     CommitIdx uint64
 }
 
-type VoteRequest struct {
-    Term uint64
-    CandidId int
-    LastLogIdx uint64
-    LastLogTerm uint64
-}
-
 type AppendReply struct {
     Term uint64
     Success bool
@@ -46,15 +33,22 @@ type AppendReply struct {
     LastModIdx uint64
 }
 
+type ClientEntry struct {
+    UID uint64
+    Data interface{}
+}
+
+type VoteRequest struct {
+    Term uint64
+    CandidId int
+    LastLogIdx uint64
+    LastLogTerm uint64
+}
+
 type VoteReply struct {
     Term uint64
     Granted bool
     NodeId int
-}
-
-type ClientEntry struct {
-    UID uint64
-    Data interface{}
 }
 
 // Must maintain a map from serverIds to (network) address/socket
@@ -66,12 +60,6 @@ type Messenger interface {
     Client503(uid uint64) // service temporarily unavailable
 }
 
-type RaftFields struct {
-    Term uint64
-    VotedFor int
-    // configuration details?
-}
-
 type Persister interface {
     LogUpdate([]RaftEntry) // (truncate and) append log entries
     LogRead() []RaftEntry
@@ -81,11 +69,11 @@ type Persister interface {
     StatusSave(RaftFields)
 }
 
-//type LogState struct {
-//    LastInclIdx uint64
-//    LastInclTerm uint64
-//    // configuration details?
-//}
+type RaftFields struct {
+    Term uint64
+    VotedFor int
+    // configuration details?
+}
 
 // should be internally linked with the Messenger object to respond to clients
 type Machine interface {
@@ -102,3 +90,9 @@ type Machine interface {
     //LoadSnapshot() *LogState
     //SerializeSnapshot() ByteStream?
 }
+
+//type LogState struct {
+//    LastInclIdx uint64
+//    LastInclTerm uint64
+//    // configuration details?
+//}

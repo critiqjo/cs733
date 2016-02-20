@@ -4,7 +4,7 @@ import "testing"
 import "time"
 import "reflect"
 
-type DummyMsger struct { // {{{
+type DummyMsger struct { // {{{1
     notifch chan<- Message
     testch chan interface{}
 }
@@ -14,24 +14,22 @@ func (self *DummyMsger) Send(nodeId int, msg Message)          { self.testch <- 
 func (self *DummyMsger) BroadcastVoteRequest(msg *VoteRequest) { self.testch <- msg }
 func (self *DummyMsger) Client301(uid uint64, nodeId int)      { } // this is correct too!!
 func (self *DummyMsger) Client503(uid uint64)                  { } // you guessed it!!!
-// }}}
 
-type DummyPster struct { } // {{{
+type DummyPster struct { } // {{{1
 
 func (pster *DummyPster) LogUpdate([]RaftEntry)   { }
 func (pster *DummyPster) LogRead() []RaftEntry    { return nil }
 func (pster *DummyPster) StatusLoad() *RaftFields { return nil }
 func (pster *DummyPster) StatusSave(RaftFields)   { }
-// }}}
 
-type DummyMachn struct { // {{{
+type DummyMachn struct { // {{{1
     msger *DummyMsger
 }
 
 func (self *DummyMachn) ApplyLazy(entries []ClientEntry)  { self.msger.testch <- entries }
 func (self *DummyMachn) RespondIfSeen(uid uint64) bool { return false }
-// }}}
 
+// ---- utility functions {{{1
 func assert(t *testing.T, e bool, args ...interface{}) {
     // Unidiomatic: https://golang.org/doc/faq#testing_framework
     if !e { t.Fatal(args...) }
@@ -51,7 +49,7 @@ func initTest() (*RaftNode, *DummyMsger, *DummyPster, *DummyMachn) {
     return raft, msger, pster, machn
 }
 
-func TestFollower(t *testing.T) {
+func TestFollower(t *testing.T) { // {{{1
     raft, msger, _, _ := initTest()
     var m interface{}
 
@@ -128,7 +126,7 @@ func TestFollower(t *testing.T) {
     raft.Exit()
 }
 
-func TestCandidate(t *testing.T) {
+func TestCandidate(t *testing.T) { // {{{1
     raft, msger, _, _ := initTest()
     var m interface{}
 
@@ -190,7 +188,7 @@ func TestCandidate(t *testing.T) {
     raft.Exit()
 }
 
-func TestLeader(t *testing.T) {
+func TestLeader(t *testing.T) { // {{{1
     raft, msger, _, _ := initTest()
     var m interface{}
 
