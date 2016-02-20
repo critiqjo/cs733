@@ -67,7 +67,7 @@ func (self *RaftNode) timerReset() {
     self.timer.Reset(self.state)
 }
 
-func NewRaftNode(
+func NewNode(
     nodeId, clusterSize, notifbuf int,
     msger Messenger, pster Persister, machn Machine,
 ) *RaftNode {
