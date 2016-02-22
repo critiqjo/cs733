@@ -4,6 +4,8 @@ import "testing"
 import "time"
 import "reflect"
 
+// FIXME these tests are too dependent on the execution order; make it more general?
+
 type DummyMsger struct { // {{{1
     notifch chan<- Message
     testch chan interface{}
@@ -40,6 +42,7 @@ func assert_eq(t *testing.T, x, y interface{}, args ...interface{}) {
 }
 
 func initTest() (*RaftNode, *DummyMsger, *DummyPster, *DummyMachn) {
+    // Note: Deadlocking due to unbuffered channels is considered a bug!
     msger := &DummyMsger{ nil, make(chan interface{}) } // unbuffered channel
     pster, machn := &DummyPster{}, &DummyMachn{ msger }
     raft := NewNode(0, 5, 0, msger, pster, machn) // unbuffered channel
@@ -80,9 +83,11 @@ func TestFollower(t *testing.T) { // {{{1
         },
         CommitIdx: 2, // commited till this entry
     }
+    // Note: if the calling order of Send(.., &AppendReply) and applyCommitted(..)
+    //       changes in followerHandler, this will fail.
     m = <-msger.testch
     assert_eq(t, m, &AppendReply { 3, true, 0, 2 }, "Bad append 3t.2", m)
-    m = <-msger.testch // apply lazy of uid=1234
+    m = <-msger.testch // from ApplyLazy
     assert_eq(t, m, []ClientEntry { ClientEntry { 1234, nil } }, "Bad apply 1234", m)
 
     msger.notifch <- &AppendEntries { // heartbeat of old leader
@@ -195,22 +200,38 @@ func TestLeader(t *testing.T) { // {{{1
     m = <-msger.testch // wait for timeout
     assert_eq(t, m, &VoteRequest { 1, 0, 0, 0 }, "Bad votereq 1", m)
 
-    msger.notifch <- &VoteReply { 1, true, 2 }
-    msger.notifch <- &VoteReply { 1, true, 3 }
+    msger.notifch <- &VoteReply { 1, true, 1 }
     msger.notifch <- &testEcho { }
     m = <-msger.testch
     assert(t, raft.state == Candidate, "Bad state 1.1", raft)
 
-    msger.notifch <- &VoteReply { 1, true, 4 }
-    heartbeat := &AppendEntries { 1, 0, 0, 0, nil, 0 }
-    m = <-msger.testch
+    msger.notifch <- &VoteReply { 1, true, 2 }
+    m = <-msger.testch // wait for heartbeat
     assert(t, raft.state == Leader, "Bad state 1.2", raft)
+
+    heartbeat := &AppendEntries { 1, 0, 0, 0, nil, 0 }
     assert_eq(t, m, heartbeat, "Bad heartbeat 1.1", m)
+    assert_eq(t, <-msger.testch, heartbeat, "Bad heartbeat 1.2")
+    assert_eq(t, <-msger.testch, heartbeat, "Bad heartbeat 1.3")
+    assert_eq(t, <-msger.testch, heartbeat, "Bad heartbeat 1.4")
+
+    clen := &ClientEntry { 1234, nil }
+    apen := &AppendEntries { 1, 0, 0, 0, []RaftEntry {
+        RaftEntry { 1, 1, clen },
+    }, 0 }
+    msger.notifch <- clen
     m = <-msger.testch
-    assert_eq(t, m, heartbeat, "Bad heartbeat 1.2", m)
-    m = <-msger.testch
-    assert_eq(t, m, heartbeat, "Bad heartbeat 1.3", m)
-    m = <-msger.testch
-    assert_eq(t, m, heartbeat, "Bad heartbeat 1.4", m)
+    assert_eq(t, m, apen, "Bad AppendEntries 1.1", m)
+    assert_eq(t, <-msger.testch, apen, "Bad heartbeat 1.2")
+    assert_eq(t, <-msger.testch, apen, "Bad heartbeat 1.3")
+    assert_eq(t, <-msger.testch, apen, "Bad heartbeat 1.4")
+
+    msger.notifch <- &AppendReply { 1, true, 1, 1 }
+    msger.notifch <- &AppendReply { 1, true, 2, 1 }
+    m = <-msger.testch // from ApplyLazy
+    assert_eq(t, m, []ClientEntry { ClientEntry { 1234, nil } }, "Bad apply 1234", m)
+    msger.notifch <- &AppendReply { 1, true, 3, 1 }
+    msger.notifch <- &AppendReply { 1, true, 4, 1 }
+
     raft.Exit()
 }

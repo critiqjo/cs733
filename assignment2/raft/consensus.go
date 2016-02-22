@@ -3,6 +3,7 @@ package raft
 import (
     err "log" // avoid confusion
     "os"
+    "sort"
     "time"
 )
 
@@ -22,8 +23,8 @@ type RaftNode struct { // FIXME organize differently?
     lastAppld uint64
     // state-specific fields
     voteSet map[int]bool // candidate: used as a set -- bool values are not used
-    nextIdx []uint64 // leader
-    matchIdx []uint64 // leader
+    nextIdx []uint64 // leader: use a map?
+    matchIdx []uint64 // leader: use a map?
     // extras
     uidIdxMap map[uint64]uint64 // uid -> idx map for entries not yet applied
     timer *RaftTimer
@@ -69,7 +70,7 @@ func NewNode( // {{{1
         voteSet: nil,
         nextIdx: nil,
         matchIdx: nil,
-        uidIdxMap: make(map[uint64]uint64),
+        uidIdxMap: nil,
         timer: nil,
         notifch: notifch,
         msger: msger,
@@ -120,6 +121,24 @@ func (self *RaftNode) Exit() { // {{{1
 }
 
 // ---- private utility methods {{{1
+func (self *RaftNode) applyCommitted() {
+    if self.lastAppld < self.commitIdx {
+        firstIdx := self.log[0].Index
+        var cEntries []ClientEntry
+        for idx := self.lastAppld + 1; idx <= self.commitIdx; idx += 1 {
+            cEntry := self.log[idx - firstIdx].Entry
+            if cEntry != nil {
+                cEntries = append(cEntries, *cEntry)
+                delete(self.uidIdxMap, cEntry.UID)
+            }
+        }
+        if len(cEntries) > 0 {
+            self.machn.ApplyLazy(cEntries)
+        }
+        self.lastAppld = self.commitIdx
+    }
+}
+
 func (self *RaftNode) isUpToDate(r *VoteRequest) bool {
     log := self.log
     lastEntry := log[len(log) - 1]
@@ -176,7 +195,17 @@ func (self *RaftNode) timerReset() {
 }
 
 func (self *RaftNode) updateCommitIdx() {
-    // TODO
+    var logOffs []int
+    firstIdx := self.log[0].Index
+    for nodeId, idx := range self.matchIdx {
+        if nodeId == self.id { continue }
+        logOffs = append(logOffs, int(idx - firstIdx))
+    }
+    sort.Ints(logOffs)
+    offset := (self.size - 1) / 2
+    if self.log[logOffs[offset]].Term == self.term {
+        self.commitIdx = firstIdx + uint64(logOffs[offset]) // assert monotonicity?
+    }
 }
 
 func (self *RaftNode) followerHandler(m Message) { // {{{1
@@ -213,22 +242,7 @@ func (self *RaftNode) followerHandler(m Message) { // {{{1
                         pracCommitIdx = lastIdx
                     }
                     self.commitIdx = pracCommitIdx
-                    if self.lastAppld < pracCommitIdx {
-                        from, to := self.lastAppld + 1, pracCommitIdx + 1
-                        clientEntries := make([]ClientEntry, to - from)
-                        ci := 0
-                        for idx := from; idx < to; idx += 1 {
-                            cEntry := log[idx - firstIdx].Entry
-                            if cEntry != nil {
-                                clientEntries[ci] = *cEntry
-                                ci += 1
-                            }
-                        }
-                        if ci > 0 {
-                            self.machn.ApplyLazy(clientEntries[:ci])
-                        }
-                        self.lastAppld = self.commitIdx
-                    }
+                    self.applyCommitted()
                 } // else don't panic!
             } else {
                 self.msger.Send(msg.LeaderId, &AppendReply {
@@ -310,6 +324,7 @@ func (self *RaftNode) candidateHandler(m Message) { // {{{1
         if msg.Term == self.term && msg.Granted {
             self.voteSet[msg.NodeId] = true
             if len(self.voteSet) > self.size / 2 {
+                self.uidIdxMap = make(map[uint64]uint64)
                 self.matchIdx = make([]uint64, self.size)
                 lastIdx := self.log[len(self.log) - 1].Index
                 self.nextIdx = make([]uint64, self.size)
@@ -329,6 +344,7 @@ func (self *RaftNode) candidateHandler(m Message) { // {{{1
 
     case *timeout:
         self.voteSet = make(map[int]bool)
+        self.voteSet[self.id] = true
         self.setTermAndVote(self.term + 1, self.id)
         lastI := len(self.log) - 1
         self.msger.BroadcastVoteRequest(&VoteRequest {
@@ -357,20 +373,11 @@ func (self *RaftNode) leaderHandler(m Message) { // {{{1
     case *AppendReply:
         nodeId := msg.NodeId
         if msg.Success == true {
-            firstIdx := self.log[0].Index
             lastI := len(self.log) - 1
             if msg.LastModIdx > 0 {
                 self.matchIdx[nodeId] = msg.LastModIdx // assert monotonicity?
                 self.updateCommitIdx()
-                if self.commitIdx > self.lastAppld {
-                    fromI := int(self.lastAppld - firstIdx) + 1
-                    tillI := int(self.commitIdx - firstIdx) + 1
-                    ces := make([]ClientEntry, tillI - fromI)
-                    for i := range ces {
-                        ces[i] = *self.log[fromI + i].Entry
-                    }
-                    self.machn.ApplyLazy(ces)
-                }
+                self.applyCommitted()
             }
             if self.nextIdx[nodeId] <= self.log[lastI].Index {
                 self.sendAppendEntries(nodeId, 8)
@@ -397,9 +404,7 @@ func (self *RaftNode) leaderHandler(m Message) { // {{{1
             i := int(logIdx - firstIdx)
             if self.log[i].Entry.UID == msg.UID {
                 break
-            } else {
-                delete(self.uidIdxMap, msg.UID)
-            }
+            } // else panic?
         }
         lastI := len(self.log) - 1
         newIdx := self.log[lastI].Index + 1
