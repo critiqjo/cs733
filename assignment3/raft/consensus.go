@@ -14,7 +14,6 @@ type RaftNode struct { // FIXME organize differently?
     id int // node id - need not be in the range of 0..size
     size int // cluster size - too simplistic to support config. changes?
     // persistent fields
-    log []RaftEntry
     term uint64
     votedFor int
     // volatile fields
@@ -41,29 +40,21 @@ func NewNode( // {{{1
     nodeId, clusterSize, notifbuf int,
     msger Messenger, pster Persister, machn Machine,
 ) *RaftNode {
-    s := pster.StatusLoad()
-    var term uint64
-    var votedFor int
-    if s == nil {
-        term = 0
-        votedFor = -1
-    } else {
-        term = s.Term
-        votedFor = s.VotedFor
+    rf := pster.GetFields()
+    if rf == nil {
+        rf = &RaftFields { 0, -1 }
+    }
+    if idx, entry := pster.LastEntry(); idx == 0 && entry == nil {
+        ok := pster.LogUpdate(0, []RaftEntry { RaftEntry { 0, nil } })
+        if !ok { return nil }
     }
     notifch := make(chan Message, notifbuf)
     msger.Register(notifch)
-    log := pster.LogRead()
-    if log == nil {
-        // simplification: to avoid a few checks for empty log
-        log = []RaftEntry { RaftEntry { 0, 0, nil } }
-    }
     return &RaftNode {
         id: nodeId,
-        size: clusterSize, // TODO read from pster
-        log: log,
-        term: term,
-        votedFor: votedFor,
+        size: clusterSize,
+        term: rf.Term,
+        votedFor: rf.VotedFor,
         state: Follower,
         commitIdx: 0,
         lastAppld: 0,
@@ -121,12 +112,19 @@ func (self *RaftNode) Exit() { // {{{1
 }
 
 // ---- private utility methods {{{1
+func (self *RaftNode) log(idx uint64) *RaftEntry {
+    return self.pster.Entry(idx)
+}
+
+func (self *RaftNode) logTail() (uint64, *RaftEntry) {
+    return self.pster.LastEntry()
+}
+
 func (self *RaftNode) applyCommitted() {
     if self.lastAppld < self.commitIdx {
-        firstIdx := self.log[0].Index
         var cEntries []ClientEntry
         for idx := self.lastAppld + 1; idx <= self.commitIdx; idx += 1 {
-            cEntry := self.log[idx - firstIdx].Entry
+            cEntry := self.log(idx).CEntry
             if cEntry != nil {
                 cEntries = append(cEntries, *cEntry)
                 delete(self.uidIdxMap, cEntry.UID)
@@ -140,71 +138,66 @@ func (self *RaftNode) applyCommitted() {
 }
 
 func (self *RaftNode) isUpToDate(r *VoteRequest) bool {
-    log := self.log
-    lastEntry := log[len(log) - 1]
-    return r.LastLogTerm > lastEntry.Term || (r.LastLogTerm == lastEntry.Term &&
-                                              r.LastLogIdx >= lastEntry.Index)
+    lastIdx, lastEntry := self.logTail()
+    return r.LastLogTerm > lastEntry.Term || (r.LastLogTerm == lastEntry.Term && r.LastLogIdx >= lastIdx)
 }
 
-func (self *RaftNode) logAppend(at int, entries []RaftEntry) uint64 {
-    log := self.log
-    // assert log[at - 1].Index + 1 == entries[0].Index
-    log = append(log[:at], entries...)
-    self.pster.LogUpdate(log[at:])
-    self.log = log
-    return log[len(log) - 1].Index
+func (self *RaftNode) logAppend(startIdx uint64, entries []RaftEntry) {
+    if ok := self.pster.LogUpdate(startIdx, entries); !ok {
+        self.err.Print("fatal: unable to update log; ignoring!!!")
+    }
 }
 
 func (self *RaftNode) sendAppendEntries(nodeId, num_entries int) {
-    firstIdx := self.log[0].Index
     nextIdx := self.nextIdx[nodeId]
-    fromI := int(nextIdx - firstIdx)
-    tillI := fromI + num_entries
-    if tillI > len(self.log) {
-        tillI = len(self.log)
-    }
-    var slice []RaftEntry = nil
-    if fromI < tillI {
-        // Gonote: nil != empty slice
-        slice = self.log[fromI:tillI]
+    slice, ok := self.pster.LogSlice(nextIdx, num_entries)
+    if !ok {
+        self.err.Print("fatal: log index out of bounds; ignoring!!!")
+        return
     }
     self.msger.Send(nodeId, &AppendEntries {
         Term: self.term,
         LeaderId: self.id,
         PrevLogIdx: nextIdx - 1,
-        PrevLogTerm: self.log[fromI - 1].Term,
+        PrevLogTerm: self.log(nextIdx - 1).Term,
         Entries: slice,
         CommitIdx: self.commitIdx,
     })
-    self.nextIdx[nodeId] += uint64(tillI - fromI)
+    self.nextIdx[nodeId] += uint64(len(slice))
 }
 
 func (self *RaftNode) setTermAndVote(term uint64, vote int) {
     self.term = term
     self.votedFor = vote
-    self.pster.StatusSave(RaftFields { Term: term, VotedFor: vote })
+    ok := self.pster.SetFields(RaftFields { Term: term, VotedFor: vote })
+    if !ok {
+        self.err.Print("fatal: could not persist fields; ignoring!!!")
+    }
 }
 
 func (self *RaftNode) setVote(vote int) {
-    self.votedFor = vote
-    self.pster.StatusSave(RaftFields { Term: self.term, VotedFor: vote })
+    self.setTermAndVote(self.term, vote)
 }
 
 func (self *RaftNode) timerReset() {
     self.timer.Reset(self.state)
 }
 
+type idxSlice []uint64
+func (l idxSlice) Len() int           { return len(l) }
+func (l idxSlice) Swap(i, j int)      { l[i], l[j] = l[j], l[i] }
+func (l idxSlice) Less(i, j int) bool { return l[i] < l[j] }
+
 func (self *RaftNode) updateCommitIdx() {
-    var logOffs []int
-    firstIdx := self.log[0].Index
+    var matchIdx []uint64
     for nodeId, idx := range self.matchIdx {
         if nodeId == self.id { continue }
-        logOffs = append(logOffs, int(idx - firstIdx))
+        matchIdx = append(matchIdx, idx)
     }
-    sort.Ints(logOffs)
+    sort.Sort(idxSlice(matchIdx))
     offset := (self.size - 1) / 2
-    if self.log[logOffs[offset]].Term == self.term {
-        self.commitIdx = firstIdx + uint64(logOffs[offset]) // assert monotonicity?
+    if self.log(matchIdx[offset]).Term == self.term {
+        self.commitIdx = matchIdx[offset] // assert monotonicity?
     }
 }
 
@@ -221,22 +214,20 @@ func (self *RaftNode) followerHandler(m Message) { // {{{1
                 self.setTermAndVote(msg.Term, msg.LeaderId) // to track leaderId
             }
 
-            log := self.log
+            lastIdx, _ := self.logTail()
             prevIdx := msg.PrevLogIdx
-            firstIdx := log[0].Index
-            prevOff := int(prevIdx - firstIdx)
-            if int(prevOff) < len(log) && log[prevOff].Term == msg.PrevLogTerm {
-                var lastModIdx uint64 = 0
-                if len(msg.Entries) > 0 {
-                    // Gonote: len(nil) is zero (if nil is of slice type)
-                    lastModIdx = self.logAppend(prevOff + 1, msg.Entries)
+            if prevIdx <= lastIdx && self.log(prevIdx).Term == msg.PrevLogTerm {
+                var lastModIdx uint64 = 0 // should be non-zero only for non-heartbeat
+                if len(msg.Entries) > 0 { // not heartbeat!
+                    self.logAppend(prevIdx + 1, msg.Entries)
+                    lastModIdx, _ = self.logTail()
                 }
                 self.msger.Send(msg.LeaderId, &AppendReply {
                     Term: self.term, Success: true,
                     NodeId: self.id, LastModIdx: lastModIdx,
                 })
                 if self.commitIdx < msg.CommitIdx {
-                    lastIdx := firstIdx + uint64(len(log) - 1)
+                    lastIdx, _ := self.logTail()
                     pracCommitIdx := msg.CommitIdx
                     if pracCommitIdx > lastIdx {
                         pracCommitIdx = lastIdx
@@ -326,7 +317,7 @@ func (self *RaftNode) candidateHandler(m Message) { // {{{1
             if len(self.voteSet) > self.size / 2 {
                 self.uidIdxMap = make(map[uint64]uint64)
                 self.matchIdx = make([]uint64, self.size)
-                lastIdx := self.log[len(self.log) - 1].Index
+                lastIdx, _ := self.logTail()
                 self.nextIdx = make([]uint64, self.size)
                 for i := range self.nextIdx {
                     self.nextIdx[i] = lastIdx + 1
@@ -346,12 +337,12 @@ func (self *RaftNode) candidateHandler(m Message) { // {{{1
         self.voteSet = make(map[int]bool)
         self.voteSet[self.id] = true
         self.setTermAndVote(self.term + 1, self.id)
-        lastI := len(self.log) - 1
+        lastIdx, lastEntry := self.logTail()
         self.msger.BroadcastVoteRequest(&VoteRequest {
             self.term,
             self.id,
-            self.log[lastI].Index,
-            self.log[lastI].Term,
+            lastIdx,
+            lastEntry.Term,
         })
         self.timerReset()
 
@@ -373,13 +364,13 @@ func (self *RaftNode) leaderHandler(m Message) { // {{{1
     case *AppendReply:
         nodeId := msg.NodeId
         if msg.Success == true {
-            lastI := len(self.log) - 1
+            lastIdx, _ := self.logTail()
             if msg.LastModIdx > 0 {
                 self.matchIdx[nodeId] = msg.LastModIdx // assert monotonicity?
                 self.updateCommitIdx()
                 self.applyCommitted()
             }
-            if self.nextIdx[nodeId] <= self.log[lastI].Index {
+            if self.nextIdx[nodeId] <= lastIdx {
                 self.sendAppendEntries(nodeId, 8)
             }
         } else if msg.Term == self.term { // log mismatch
@@ -400,19 +391,13 @@ func (self *RaftNode) leaderHandler(m Message) { // {{{1
         if self.machn.RespondIfSeen(msg.UID) {
             break
         } else if logIdx, ok := self.uidIdxMap[msg.UID]; ok {
-            firstIdx := self.log[0].Index
-            i := int(logIdx - firstIdx)
-            if self.log[i].Entry.UID == msg.UID {
+            if self.log(logIdx).CEntry.UID == msg.UID {
                 break
             } // else panic?
         }
-        lastI := len(self.log) - 1
-        newIdx := self.log[lastI].Index + 1
-        self.log = append(self.log, RaftEntry {
-            Index: newIdx,
-            Term: self.term,
-            Entry: msg,
-        })
+        lastIdx, _ := self.logTail()
+        newIdx := lastIdx + 1
+        self.logAppend(newIdx, []RaftEntry { RaftEntry { self.term, msg } })
         self.uidIdxMap[msg.UID] = newIdx
         for nodeId := range self.nextIdx {
             if nodeId == self.id { continue }

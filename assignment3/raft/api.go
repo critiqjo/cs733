@@ -9,9 +9,8 @@ const (
 )
 
 type RaftEntry struct {
-    Index uint64 // FIXME? redundant (not SPOT), but convinient
     Term uint64
-    Entry *ClientEntry
+    CEntry *ClientEntry
 }
 
 type Message interface {}
@@ -60,13 +59,22 @@ type Messenger interface {
     Client503(uid uint64) // service temporarily unavailable
 }
 
-type Persister interface {
-    LogUpdate([]RaftEntry) // (truncate and) append log entries
-    LogRead() []RaftEntry
-    //LogReadTail(count int) []RaftEntry
-    //LogReadSlice(begIdx uint64, endIdx uint64) []RaftEntry // end-exclusive
-    StatusLoad() *RaftFields // return InitState by default
-    StatusSave(RaftFields)
+type Persister interface { // caching of log could be done by the implementer
+    Entry(idx uint64) *RaftEntry // return nil if out of bounds
+
+    // if log is empty, return (0, nil); otherwise, return (last log index, last log entry)
+    LastEntry() (uint64, *RaftEntry)
+
+    // if n > 0 and startIdx is within bounds, return (slice, true) where 0 < len(slice) <= n
+    // if n = 0 and startIdx-1 is within bounds, return (nil, true)
+    // otherwise, return (nil, false)
+    LogSlice(startIdx uint64, n int) ([]RaftEntry, bool)
+
+    // Append log entries (possibly after truncating the log from startIdx)
+    LogUpdate(startIdx uint64, slice []RaftEntry) bool
+
+    GetFields() *RaftFields // return nil if no record
+    SetFields(RaftFields) bool
 }
 
 type RaftFields struct {

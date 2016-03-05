@@ -17,12 +17,44 @@ func (self *DummyMsger) BroadcastVoteRequest(msg *VoteRequest) { self.testch <- 
 func (self *DummyMsger) Client301(uid uint64, nodeId int)      { } // this is correct too!!
 func (self *DummyMsger) Client503(uid uint64)                  { } // you guessed it!!!
 
-type DummyPster struct { } // {{{1
+type DummyPster struct { // {{{1
+    log []RaftEntry
+}
 
-func (pster *DummyPster) LogUpdate([]RaftEntry)   { }
-func (pster *DummyPster) LogRead() []RaftEntry    { return nil }
-func (pster *DummyPster) StatusLoad() *RaftFields { return nil }
-func (pster *DummyPster) StatusSave(RaftFields)   { }
+func (self *DummyPster) Entry(idx uint64) *RaftEntry {
+    return &self.log[idx]
+}
+func (self *DummyPster) LastEntry() (uint64, *RaftEntry) {
+    if len(self.log) == 0 { return 0, nil }
+    lastIdx := len(self.log) - 1
+    return uint64(lastIdx), &self.log[lastIdx]
+}
+func (self *DummyPster) LogSlice(startIdx uint64, n int) ([]RaftEntry, bool) {
+    if n == 0 {
+        if int(startIdx) < len(self.log) + 1 {
+            return nil, true
+        }
+    } else if n > 0 {
+        if int(startIdx) < len(self.log) {
+            endIdx := int(startIdx) + n
+            if endIdx > len(self.log) {
+                endIdx = len(self.log)
+            }
+            return self.log[startIdx:endIdx], true
+        }
+    }
+    return nil, false
+}
+func (self *DummyPster) LogUpdate(startIdx uint64, slice []RaftEntry) bool {
+    if startIdx == 0 {
+        self.log = slice
+    } else {
+        self.log = append(self.log[0:int(startIdx)], slice...)
+    }
+    return true
+}
+func (self *DummyPster) GetFields() *RaftFields { return nil }
+func (self *DummyPster) SetFields(RaftFields) bool { return true }
 
 type DummyMachn struct { // {{{1
     msger *DummyMsger
@@ -63,9 +95,8 @@ func TestFollower(t *testing.T) { // {{{1
         PrevLogTerm: 0,
         Entries: []RaftEntry {
             RaftEntry {
-                Index: 1,
                 Term: 1,
-                Entry: &ClientEntry { 1234, nil },
+                CEntry: &ClientEntry { 1234, nil },
             },
         },
         CommitIdx: 0,
@@ -79,7 +110,7 @@ func TestFollower(t *testing.T) { // {{{1
         PrevLogIdx: 1,
         PrevLogTerm: 1,
         Entries: []RaftEntry {
-            RaftEntry { 2, 3, nil }, // nothing to apply
+            RaftEntry { 3, nil }, // nothing to apply
         },
         CommitIdx: 2, // commited till this entry
     }
@@ -107,13 +138,13 @@ func TestFollower(t *testing.T) { // {{{1
         PrevLogIdx: 2,
         PrevLogTerm: 3,
         Entries: []RaftEntry {
-            RaftEntry { 3, 3, nil },
+            RaftEntry { 3, nil },
         },
         CommitIdx: 2,
     }
     m = <-msger.testch
     assert_eq(t, m, &AppendReply { 3, true, 0, 3 }, "Bad append 3t.3", m)
-    assert(t, raft.log[3].Term == 3, "Bad log 3")
+    assert(t, raft.log(3).Term == 3, "Bad log 3")
 
     msger.notifch <- &AppendEntries { // overwrite previous entry
         Term: 4,
@@ -121,13 +152,13 @@ func TestFollower(t *testing.T) { // {{{1
         PrevLogIdx: 2,
         PrevLogTerm: 3,
         Entries: []RaftEntry {
-            RaftEntry { 3, 4, nil },
+            RaftEntry { 4, nil },
         },
         CommitIdx: 2,
     }
     m = <-msger.testch
     assert_eq(t, m, &AppendReply { 4, true, 0, 3 }, "Bad append 4.1", m)
-    assert(t, raft.log[3].Term == 4, "Bad log 4")
+    assert(t, raft.log(3).Term == 4, "Bad log 4")
     raft.Exit()
 }
 
@@ -141,9 +172,9 @@ func TestCandidate(t *testing.T) { // {{{1
         PrevLogIdx: 0,
         PrevLogTerm: 0,
         Entries: []RaftEntry {
-            RaftEntry { 1, 1, nil },
-            RaftEntry { 2, 1, nil },
-            RaftEntry { 3, 4, nil },
+            RaftEntry { 1, nil },
+            RaftEntry { 1, nil },
+            RaftEntry { 4, nil },
         },
         CommitIdx: 3,
     }
@@ -217,7 +248,7 @@ func TestLeader(t *testing.T) { // {{{1
 
     clen := &ClientEntry { 1234, nil }
     apen := &AppendEntries { 1, 0, 0, 0, []RaftEntry {
-        RaftEntry { 1, 1, clen },
+        RaftEntry { 1, clen },
     }, 0 }
     msger.notifch <- clen
     m = <-msger.testch
