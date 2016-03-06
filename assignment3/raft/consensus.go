@@ -1,7 +1,8 @@
 package raft
 
 import (
-    err "log" // avoid confusion
+    "errors"
+    golog "log" // avoid confusion
     "os"
     "sort"
     "time"
@@ -11,8 +12,8 @@ import (
 //       All events including timeouts are received on a single channel
 
 type RaftNode struct { // FIXME organize differently?
-    id int // node id - need not be in the range of 0..size
-    size int // cluster size - too simplistic to support config. changes?
+    id int // node id
+    peerIds []int
     // persistent fields
     term uint64
     votedFor int
@@ -22,10 +23,10 @@ type RaftNode struct { // FIXME organize differently?
     lastAppld uint64
     // state-specific fields
     voteSet map[int]bool // candidate: used as a set -- bool values are not used
-    nextIdx []uint64 // leader: use a map?
-    matchIdx []uint64 // leader: use a map?
+    nextIdx map[int]uint64 // leader
+    matchIdx map[int]uint64 // leader
     // extras
-    uidIdxMap map[uint64]uint64 // uid -> idx map for entries not yet applied
+    idxOfUid map[uint64]uint64 // uid -> idx map for entries not yet applied
     timer *RaftTimer
     // links
     notifch chan Message
@@ -33,26 +34,49 @@ type RaftNode struct { // FIXME organize differently?
     pster Persister
     machn Machine
     // error logging
-    err *err.Logger
+    err *golog.Logger
 }
 
 func NewNode( // {{{1
-    nodeId, clusterSize, notifbuf int,
+    selfId int, nodeIds []int, notifbuf int,
     msger Messenger, pster Persister, machn Machine,
-) *RaftNode {
+) (*RaftNode, error) {
     rf := pster.GetFields()
+    var peerIds []int
+    if len(nodeIds) < 3 {
+        return nil, errors.New("Not enough nodes!")
+    } else {
+        var pSet = make(map[int]bool)
+        var selfFound bool = false
+        for _, peerId := range nodeIds {
+            if peerId == selfId {
+                selfFound = true
+            } else {
+                pSet[peerId] = true
+            }
+        }
+        if !selfFound {
+            return nil, errors.New("nodeIds should contain selfId")
+        }
+        for peerId := range pSet {
+            peerIds = append(peerIds, peerId)
+        }
+        if len(peerIds) + 1 != len(nodeIds) {
+            return nil, errors.New("nodeIds should not have duplicates")
+        }
+    }
     if rf == nil {
         rf = &RaftFields { 0, -1 }
     }
     if idx, entry := pster.LastEntry(); idx == 0 && entry == nil {
         ok := pster.LogUpdate(0, []RaftEntry { RaftEntry { 0, nil } })
-        if !ok { return nil }
+        if !ok { return nil, errors.New("Initial log update failed") }
     }
     notifch := make(chan Message, notifbuf)
     msger.Register(notifch)
     return &RaftNode {
-        id: nodeId,
-        size: clusterSize,
+        id: selfId,
+        peerIds: peerIds,
         term: rf.Term,
         votedFor: rf.VotedFor,
         state: Follower,
@@ -61,14 +85,14 @@ func NewNode( // {{{1
         voteSet: nil,
         nextIdx: nil,
         matchIdx: nil,
-        uidIdxMap: nil,
+        idxOfUid: nil,
         timer: nil,
         notifch: notifch,
         msger: msger,
         pster: pster,
         machn: machn,
-        err: err.New(os.Stderr, "err: ", err.Lshortfile),
-    }
+        err: golog.New(os.Stderr, "err: ", golog.Lshortfile),
+    }, nil
 }
 
 // Run the event loop, waits for messages and timeouts
@@ -127,7 +151,7 @@ func (self *RaftNode) applyCommitted() {
             cEntry := self.log(idx).CEntry
             if cEntry != nil {
                 cEntries = append(cEntries, *cEntry)
-                delete(self.uidIdxMap, cEntry.UID)
+                delete(self.idxOfUid, cEntry.UID)
             }
         }
         if len(cEntries) > 0 {
@@ -195,7 +219,7 @@ func (self *RaftNode) updateCommitIdx() {
         matchIdx = append(matchIdx, idx)
     }
     sort.Sort(idxSlice(matchIdx))
-    offset := (self.size - 1) / 2
+    offset := len(self.peerIds) / 2
     if self.log(matchIdx[offset]).Term == self.term {
         self.commitIdx = matchIdx[offset] // assert monotonicity?
     }
@@ -314,20 +338,22 @@ func (self *RaftNode) candidateHandler(m Message) { // {{{1
     case *VoteReply:
         if msg.Term == self.term && msg.Granted {
             self.voteSet[msg.NodeId] = true
-            if len(self.voteSet) > self.size / 2 { // majority voted yes
-                self.uidIdxMap = make(map[uint64]uint64)
+            // voteSet contains self vote too, but peerIds doesn't contain self id
+            if len(self.voteSet) > (len(self.peerIds) + 1) / 2 {
                 lastIdx, _ := self.logTail()
-                self.matchIdx = make([]uint64, self.size)
+                self.idxOfUid = make(map[uint64]uint64)
                 for idx := self.lastAppld + 1; idx <= lastIdx; idx += 1 {
-                    // fill uidIdxMap with unapplied requests
+                    // fill idxOfUid with unapplied requests
                     entry := self.log(idx)
                     if entry.CEntry != nil {
-                        self.uidIdxMap[entry.CEntry.UID] = idx
+                        self.idxOfUid[entry.CEntry.UID] = idx
                     }
                 }
-                self.nextIdx = make([]uint64, self.size)
-                for i := range self.nextIdx {
-                    self.nextIdx[i] = lastIdx + 1
+                self.matchIdx = make(map[int]uint64)
+                self.nextIdx = make(map[int]uint64)
+                for _, nodeId := range self.peerIds {
+                    self.matchIdx[nodeId] = 0
+                    self.nextIdx[nodeId] = lastIdx + 1
                 }
                 self.state = Leader
                 self.leaderHandler(&timeout { 0 })
@@ -400,18 +426,18 @@ func (self *RaftNode) leaderHandler(m Message) { // {{{1
     case *ClientEntry:
         if self.machn.RespondIfSeen(msg.UID) {
             break
-        } else if logIdx, ok := self.uidIdxMap[msg.UID]; ok {
+        } else if logIdx, ok := self.idxOfUid[msg.UID]; ok {
             if self.log(logIdx).CEntry.UID != msg.UID {
                 // this can only happen if a log entry was rewritten,
-                // but uidIdxMap is reset when a candidate becomes leader
-                self.err.Print("fatal: uidIdxMap malfunction; ignoring!!!")
+                // but idxOfUid is reset when a candidate becomes leader
+                self.err.Print("fatal: idxOfUid mismatch; ignoring!!!")
             }
             break
         }
         lastIdx, _ := self.logTail()
         newIdx := lastIdx + 1
         self.logAppend(newIdx, []RaftEntry { RaftEntry { self.term, msg } })
-        self.uidIdxMap[msg.UID] = newIdx
+        self.idxOfUid[msg.UID] = newIdx
         for nodeId := range self.nextIdx {
             if nodeId == self.id { continue }
             nextIdx := self.nextIdx[nodeId]
@@ -421,8 +447,7 @@ func (self *RaftNode) leaderHandler(m Message) { // {{{1
         }
 
     case *timeout:
-        for nodeId := range self.nextIdx {
-            if nodeId == self.id { continue }
+        for _, nodeId := range self.peerIds {
             self.sendAppendEntries(nodeId, 0)
         }
         self.timerReset()

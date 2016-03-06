@@ -4,7 +4,8 @@ import "testing"
 import "time"
 import "reflect"
 
-// FIXME these tests are too dependent on the execution order; make it more general?
+// FIXME these tests are too dependent on the execution order
+// TODO test with even number of nodes
 
 type DummyMsger struct { // {{{1
     notifch chan<- Message
@@ -77,7 +78,8 @@ func initTest() (*RaftNode, *DummyMsger, *DummyPster, *DummyMachn) {
     // Note: Deadlocking due to unbuffered channels is considered a bug!
     msger := &DummyMsger{ nil, make(chan interface{}) } // unbuffered channel
     pster, machn := &DummyPster{}, &DummyMachn{ msger }
-    raft := NewNode(0, 5, 0, msger, pster, machn) // unbuffered channel
+    raft, err := NewNode(0, []int { 0, 1, 2, 3, 4 }, 0, msger, pster, machn) // unbuffered channel
+    if err != nil { panic(err) }
     go raft.Run(func(rs RaftState) time.Duration {
         return time.Duration(400) * time.Millisecond
     })
