@@ -314,10 +314,17 @@ func (self *RaftNode) candidateHandler(m Message) { // {{{1
     case *VoteReply:
         if msg.Term == self.term && msg.Granted {
             self.voteSet[msg.NodeId] = true
-            if len(self.voteSet) > self.size / 2 {
+            if len(self.voteSet) > self.size / 2 { // majority voted yes
                 self.uidIdxMap = make(map[uint64]uint64)
-                self.matchIdx = make([]uint64, self.size)
                 lastIdx, _ := self.logTail()
+                self.matchIdx = make([]uint64, self.size)
+                for idx := self.lastAppld + 1; idx <= lastIdx; idx += 1 {
+                    // fill uidIdxMap with unapplied requests
+                    entry := self.log(idx)
+                    if entry.CEntry != nil {
+                        self.uidIdxMap[entry.CEntry.UID] = idx
+                    }
+                }
                 self.nextIdx = make([]uint64, self.size)
                 for i := range self.nextIdx {
                     self.nextIdx[i] = lastIdx + 1
@@ -326,6 +333,7 @@ func (self *RaftNode) candidateHandler(m Message) { // {{{1
                 self.leaderHandler(&timeout { 0 })
             }
         } else if msg.Term > self.term {
+            self.err.Print("fatal: unsound vote reply; ignoring!!!")
             self.setTermAndVote(msg.Term, -1)
             self.state = Follower
         }
@@ -355,7 +363,9 @@ func (self *RaftNode) leaderHandler(m Message) { // {{{1
     // FIXME too many AppendEntries! coordinate heartbeats with non-heartbeats
     switch msg := m.(type) {
     case *AppendEntries:
-        // assert self.term != msg.Term
+        if self.term == msg.Term {
+            self.err.Print("fatal: two leaders of same term; ignoring!!!")
+        }
         self.candidateHandler(msg)
 
     case *VoteRequest:
@@ -391,9 +401,12 @@ func (self *RaftNode) leaderHandler(m Message) { // {{{1
         if self.machn.RespondIfSeen(msg.UID) {
             break
         } else if logIdx, ok := self.uidIdxMap[msg.UID]; ok {
-            if self.log(logIdx).CEntry.UID == msg.UID {
-                break
-            } // else panic?
+            if self.log(logIdx).CEntry.UID != msg.UID {
+                // this can only happen if a log entry was rewritten,
+                // but uidIdxMap is reset when a candidate becomes leader
+                self.err.Print("fatal: uidIdxMap malfunction; ignoring!!!")
+            }
+            break
         }
         lastIdx, _ := self.logTail()
         newIdx := lastIdx + 1

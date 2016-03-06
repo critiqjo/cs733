@@ -152,13 +152,65 @@ func TestFollower(t *testing.T) { // {{{1
         PrevLogIdx: 2,
         PrevLogTerm: 3,
         Entries: []RaftEntry {
-            RaftEntry { 4, nil },
+            RaftEntry { 4, nil }, // 3
         },
         CommitIdx: 2,
     }
     m = <-msger.testch
     assert_eq(t, m, &AppendReply { 4, true, 0, 3 }, "Bad append 4.1", m)
     assert(t, raft.log(3).Term == 4, "Bad log 4")
+
+    msger.notifch <- &AppendEntries { // a lot happened!!
+        Term: 8,
+        LeaderId: 2,
+        PrevLogIdx: 11,
+        PrevLogTerm: 8,
+        Entries: nil,
+        CommitIdx: 10,
+    }
+    m = <-msger.testch
+    assert_eq(t, m, &AppendReply { 8, false, 0, 0 }, "Bad append 8.1", m)
+
+    msger.notifch <- &AppendEntries {
+        Term: 8,
+        LeaderId: 2,
+        PrevLogIdx: 3,
+        PrevLogTerm: 4,
+        Entries: []RaftEntry {
+            RaftEntry { 4, &ClientEntry { 1235, nil } }, // 4
+            RaftEntry { 4, &ClientEntry { 1236, nil } }, // 5
+            RaftEntry { 6, &ClientEntry { 1237, nil } }, // 6
+            RaftEntry { 6, &ClientEntry { 1238, nil } }, // 7
+        },
+        CommitIdx: 10,
+    }
+    m = <-msger.testch
+    assert_eq(t, m, &AppendReply { 8, true, 0, 7 }, "Bad append 8.2", m)
+    m = <-msger.testch // from ApplyLazy
+    assert(t, len(m.([]ClientEntry)) == 4, "Bad apply 123*", m)
+    assert(t, raft.votedFor == 2, "Bad votedFor 8.2", raft)
+
+    msger.notifch <- &VoteRequest { 7, 1, 8, 7 } // stale term
+    m = <-msger.testch
+    assert_eq(t, m, &VoteReply { 8, false, 0 }, "Bad votereply 8.1", m)
+
+    msger.notifch <- &VoteRequest { 8, 1, 7, 6 }
+    m = <-msger.testch
+    assert_eq(t, m, &VoteReply { 8, false, 0 }, "Bad votereply 8.2", m)
+
+    msger.notifch <- &VoteRequest { 9, 1, 6, 6 } // not up to date
+    m = <-msger.testch
+    assert_eq(t, m, &VoteReply { 9, false, 0 }, "Bad votereply 9.1", m)
+
+    msger.notifch <- &VoteRequest { 9, 3, 7, 6 }
+    m = <-msger.testch
+    assert_eq(t, m, &VoteReply { 9, true, 0 }, "Bad votereply 9.2", m)
+    assert(t, raft.votedFor == 3, "Bad votedFor 9.3", raft)
+
+    msger.notifch <- &VoteRequest { 9, 4, 7, 6 } // already voted
+    m = <-msger.testch
+    assert_eq(t, m, &VoteReply { 9, false, 0 }, "Bad votereply 9.3", m)
+
     raft.Exit()
 }
 
@@ -172,14 +224,15 @@ func TestCandidate(t *testing.T) { // {{{1
         PrevLogIdx: 0,
         PrevLogTerm: 0,
         Entries: []RaftEntry {
-            RaftEntry { 1, nil },
-            RaftEntry { 1, nil },
-            RaftEntry { 4, nil },
+            RaftEntry { 1, nil }, // 1
+            RaftEntry { 1, nil }, // 2
+            RaftEntry { 4, nil }, // 3
         },
         CommitIdx: 3,
     }
     m = <-msger.testch
-    assert_eq(t, m, &AppendReply { 4, true, 0, 3 }, "Bad append 4.2", m)
+    assert_eq(t, m, &AppendReply { 4, true, 0, 3 }, "Bad append 4", m)
+    assert(t, raft.state == Follower, "Bad state 4", raft)
 
     m = <-msger.testch // wait for timeout
     assert_eq(t, m, &VoteRequest {
@@ -188,27 +241,26 @@ func TestCandidate(t *testing.T) { // {{{1
         LastLogIdx: 3,
         LastLogTerm: 4,
     }, "Bad votereq 5", m)
+    assert(t, raft.state == Candidate, "Bad state 5", raft)
+
+    msger.notifch <- &AppendEntries { 4, 2, 3, 4, nil, 3 }
+    m = <-msger.testch
+    assert_eq(t, m, &AppendReply { 5, false, 0, 0 }, "Bad append 5", m)
 
     m = <-msger.testch // wait for timeout again
     assert_eq(t, m, &VoteRequest { 6, 0, 3, 4 }, "Bad votereq 6", m)
 
-    msger.notifch <- &AppendEntries {
-        Term: 6,
-        LeaderId: 3,
-        PrevLogIdx: 3,
-        PrevLogTerm: 4,
-        Entries: nil,
-        CommitIdx: 1,
-    }
+    msger.notifch <- &AppendEntries { 6, 3, 3, 4, nil, 1 }
     m = <-msger.testch
-    assert_eq(t, m, &AppendReply { 6, true, 0, 0 }, "Bad append 5", m)
-
-    msger.notifch <- &VoteRequest { 6, 1, 3, 4 }
-    m = <-msger.testch
-    assert_eq(t, m, &VoteReply { 6, false, 0 }, "Bad votereply 6", m)
+    assert_eq(t, m, &AppendReply { 6, true, 0, 0 }, "Bad append 6", m)
+    assert(t, raft.state == Follower, "Bad state 6", raft)
 
     m = <-msger.testch // wait for timeout one last time!
-    assert_eq(t, m, &VoteRequest { 7, 0, 3, 4 }, "Bad votereq 6", m)
+    assert_eq(t, m, &VoteRequest { 7, 0, 3, 4 }, "Bad votereq 7", m)
+
+    msger.notifch <- &VoteRequest { 7, 1, 3, 4 }
+    m = <-msger.testch
+    assert_eq(t, m, &VoteReply { 7, false, 0 }, "Bad votereply 7", m)
 
     msger.notifch <- &VoteReply {
         Term: 6, // old term
@@ -220,7 +272,13 @@ func TestCandidate(t *testing.T) { // {{{1
     msger.notifch <- &VoteReply { 6, true, 4 }
     msger.notifch <- &testEcho { }
     m = <-msger.testch // wait for echo
-    assert(t, raft.state == Candidate, "Bad state 7.1", raft)
+    assert(t, raft.state == Candidate, "Bad state 7", raft)
+
+    msger.notifch <- &VoteRequest { 8, 1, 3, 4 }
+    m = <-msger.testch
+    assert_eq(t, m, &VoteReply { 8, true, 0 }, "Bad votereply 7", m)
+    assert(t, raft.state == Follower, "Bad state 8", raft)
+
     raft.Exit()
 }
 
@@ -236,33 +294,80 @@ func TestLeader(t *testing.T) { // {{{1
     m = <-msger.testch
     assert(t, raft.state == Candidate, "Bad state 1.1", raft)
 
-    msger.notifch <- &VoteReply { 1, true, 2 }
-    m = <-msger.testch // wait for heartbeat
+    msger.notifch <- &VoteReply { 1, true, 2 } // gets majority; broadcasts heartbeats
+    hb := &AppendEntries { 1, 0, 0, 0, nil, 0 } // term, id, prevIdx, prevTerm, entries, commitIdx
+    assert_eq(t, <-msger.testch, hb, "Bad heartbeat 1.1")
+    assert_eq(t, <-msger.testch, hb, "Bad heartbeat 1.2")
+    assert_eq(t, <-msger.testch, hb, "Bad heartbeat 1.3")
+    assert_eq(t, <-msger.testch, hb, "Bad heartbeat 1.4")
     assert(t, raft.state == Leader, "Bad state 1.2", raft)
 
-    heartbeat := &AppendEntries { 1, 0, 0, 0, nil, 0 }
-    assert_eq(t, m, heartbeat, "Bad heartbeat 1.1", m)
-    assert_eq(t, <-msger.testch, heartbeat, "Bad heartbeat 1.2")
-    assert_eq(t, <-msger.testch, heartbeat, "Bad heartbeat 1.3")
-    assert_eq(t, <-msger.testch, heartbeat, "Bad heartbeat 1.4")
-
     clen := &ClientEntry { 1234, nil }
-    apen := &AppendEntries { 1, 0, 0, 0, []RaftEntry {
-        RaftEntry { 1, clen },
-    }, 0 }
     msger.notifch <- clen
-    m = <-msger.testch
-    assert_eq(t, m, apen, "Bad AppendEntries 1.1", m)
-    assert_eq(t, <-msger.testch, apen, "Bad heartbeat 1.2")
-    assert_eq(t, <-msger.testch, apen, "Bad heartbeat 1.3")
-    assert_eq(t, <-msger.testch, apen, "Bad heartbeat 1.4")
+    apen := &AppendEntries { 1, 0, 0, 0, []RaftEntry { RaftEntry { 1, clen } }, 0 }
+    assert_eq(t, <-msger.testch, apen, "Bad AppendEntries 1.1")
+    assert_eq(t, <-msger.testch, apen, "Bad AppendEntries 1.2")
+    assert_eq(t, <-msger.testch, apen, "Bad AppendEntries 1.3")
+    assert_eq(t, <-msger.testch, apen, "Bad AppendEntries 1.4")
+
+    msger.notifch <- clen // duplicate; should ignore
+    msger.notifch <- &testEcho { }
+    m = <-msger.testch // wait for echo
 
     msger.notifch <- &AppendReply { 1, true, 1, 1 }
     msger.notifch <- &AppendReply { 1, true, 2, 1 }
-    m = <-msger.testch // from ApplyLazy
-    assert_eq(t, m, []ClientEntry { ClientEntry { 1234, nil } }, "Bad apply 1234", m)
-    msger.notifch <- &AppendReply { 1, true, 3, 1 }
-    msger.notifch <- &AppendReply { 1, true, 4, 1 }
+    m = <-msger.testch // majority reached, ApplyLazy
+    assert_eq(t, m, []ClientEntry { *clen }, "Bad apply 1234", m)
+
+    clen = &ClientEntry { 1235, nil }
+    msger.notifch <- &AppendEntries { 3, 1, 1, 1,
+        []RaftEntry {
+            RaftEntry { 2, nil }, // 2
+            RaftEntry { 3, nil }, // 3
+            RaftEntry { 3, nil }, // 4
+            RaftEntry { 3, clen }, // 5
+        }, 4,
+    }
+    m = <-msger.testch
+    assert_eq(t, m, &AppendReply { 3, true, 0, 5 }, "Bad append 3", m)
+    assert(t, raft.state == Follower, "Bad state 3", raft)
+
+    m = <-msger.testch // wait for timeout
+    assert_eq(t, m, &VoteRequest { 4, 0, 5, 3 }, "Bad votereq 1", m)
+
+    msger.notifch <- &VoteReply { 4, true, 1 }
+    msger.notifch <- &VoteReply { 4, true, 2 } // gets majority
+    hb = &AppendEntries { 4, 0, 5, 3, nil, 4 }
+    assert_eq(t, <-msger.testch, hb, "Bad heartbeat 4.1")
+    assert_eq(t, <-msger.testch, hb, "Bad heartbeat 4.2")
+    assert_eq(t, <-msger.testch, hb, "Bad heartbeat 4.3")
+    assert_eq(t, <-msger.testch, hb, "Bad heartbeat 4.4")
+
+    msger.notifch <- clen // duplicate; should ignore
+    msger.notifch <- &testEcho { }
+    m = <-msger.testch // wait for echo
+
+    msger.notifch <- &AppendReply { 4, false, 1, 0 }
+    assert_eq(t, <-msger.testch, &AppendEntries { 4, 0, 4, 3, nil, 4 }, "Bad append 4.1")
+    msger.notifch <- &AppendReply { 4, false, 1, 0 }
+    assert_eq(t, <-msger.testch, &AppendEntries { 4, 0, 3, 3, nil, 4 }, "Bad append 4.2")
+    msger.notifch <- &AppendReply { 4, false, 1, 0 }
+    assert_eq(t, <-msger.testch, &AppendEntries { 4, 0, 2, 2, nil, 4 }, "Bad append 4.3")
+    msger.notifch <- &AppendReply { 4, true, 1, 0 }
+    assert_eq(t, <-msger.testch, &AppendEntries {
+        4, 0, 2, 2,
+        []RaftEntry {
+            RaftEntry { 3, nil }, // 3
+            RaftEntry { 3, nil }, // 4
+            RaftEntry { 3, clen }, // 5
+        }, 4,
+    }, "Bad append 4.4")
+
+    msger.notifch <- &AppendReply { 5, false, 2, 0 }
+    msger.notifch <- &testEcho { }
+    m = <-msger.testch // wait for echo
+    assert(t, raft.term == 5, "Bad term 5", raft)
+    assert(t, raft.state == Follower, "Bad state 5")
 
     raft.Exit()
 }
