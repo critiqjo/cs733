@@ -13,15 +13,15 @@ func Encode(stuff interface{}) ([]byte, error) {
     data, err := json.Marshal(stuff)
     if err != nil { return nil, err }
     switch stuff.(type) {
-    case raft.AppendEntries:
+    case *raft.AppendEntries:
         return append([]byte("AE"), data...), nil
-    case raft.AppendReply:
+    case *raft.AppendReply:
         return append([]byte("AP"), data...), nil
-    case raft.ClientEntry:
+    case *raft.ClientEntry:
         return append([]byte("CE"), data...), nil
-    case raft.VoteRequest:
+    case *raft.VoteRequest:
         return append([]byte("VQ"), data...), nil
-    case raft.VoteReply:
+    case *raft.VoteReply:
         return append([]byte("VP"), data...), nil
     default:
         return nil, errors.New("Unknown stuff!")

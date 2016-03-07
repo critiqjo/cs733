@@ -143,7 +143,7 @@ func (self *SimpleMsger) Client503(uid uint64) {
 }
 
 func (self *SimpleMsger) SpawnListeners() { // {{{1
-    //go self.listenToPeers()
+    go self.listenToPeers()
     go self.listenToClients()
 }
 
