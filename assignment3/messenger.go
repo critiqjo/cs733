@@ -115,17 +115,22 @@ func (self *SimpleMsger) Register(raftCh chan<- raft.Message) {
 
 func (self *SimpleMsger) Send(nodeId int, msg raft.Message) {
     if sock, ok := self.peers[nodeId]; ok {
-        if err := sock.Send(Encode(msg)); err != nil {
+        data, err := Encode(msg)
+        if err == nil {
+            if err := sock.Send(data); err != nil {
+                self.err.Print(err)
+            }
+        } else {
             self.err.Print(err)
         }
+    } else {
+        self.err.Print("Bad nodeId")
     }
 }
 
 func (self *SimpleMsger) BroadcastVoteRequest(msg *raft.VoteRequest) {
-    for _, sock := range self.peers {
-        if err := sock.Send(Encode(msg)); err != nil {
-            self.err.Print(err)
-        }
+    for nodeId, _ := range self.peers {
+        self.Send(nodeId, msg)
     }
 }
 
@@ -140,6 +145,22 @@ func (self *SimpleMsger) Client503(uid uint64) {
 func (self *SimpleMsger) SpawnListeners() { // {{{1
     //go self.listenToPeers()
     go self.listenToClients()
+}
+
+func (self *SimpleMsger) listenToPeers() {
+    for {
+        data, err := self.pListen.Recv()
+        if err != nil {
+            self.err.Print("Fatal error:", err)
+            break
+        }
+        msg, err := Decode(data)
+        if err == nil {
+            self.raftCh <- msg
+        } else {
+            self.err.Print(err)
+        }
+    }
 }
 
 func (self *SimpleMsger) listenToClients() {
@@ -170,15 +191,15 @@ func (self *SimpleMsger) handleClient(conn net.Conn) { // {{{1
     }
     respCh := make(chan string, 1)
     defer conn.Close()
-    //if self.raftCh == nil {
-    //    _, _ = wstream.WriteString("ERR503\r\n")
-    //    return
-    //}
+    if self.raftCh == nil {
+        _, _ = wstream.WriteString("ERR503\r\n")
+        return
+    }
     for {
         ce, eof := ParseCEntry(rstream)
         if ce != nil {
             self.cRespCh.insert(ce.UID, respCh)
-            //self.raftCh <- ce
+            self.raftCh <- ce
             var resp string
             select {
             case resp = <-respCh:
