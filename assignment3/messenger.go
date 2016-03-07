@@ -1,6 +1,7 @@
 package main
 
 import (
+    "bufio"
     "errors"
     "fmt"
     "log"
@@ -11,19 +12,46 @@ import (
     "github.com/go-mangos/mangos/transport/tcp"
     "net"
     "os"
+    "sync"
+    "time"
 )
 
 type SimpleMsger struct {
     nodeId  int
-    rListen mangos.Socket
-    cListen net.Listener
+    raftCh  chan<- raft.Message
+    pListen mangos.Socket
     peers   map[int]mangos.Socket
-    redirs  map[int]string // client-redirect addresses
-    raftch  chan<- raft.Message
+    pCAddr  map[int]string // peer's client socket address map
+    cListen net.Listener
+    cRespCh *cRespChanMap
+    cRespTO time.Duration // response timeout
     err     *log.Logger
 }
 
-type Node struct {
+type cRespChanMap struct { // {{{1
+    sync.Mutex
+    inner map[uint64]chan<- string // uid -> response channel
+}
+
+func newCRespChanMap() *cRespChanMap {
+    return &cRespChanMap { inner: make(map[uint64]chan<- string) }
+}
+
+func (self *cRespChanMap) insert(key uint64, ch chan<- string) {
+    self.Lock()
+    self.inner[key] = ch
+    self.Unlock()
+}
+
+func (self *cRespChanMap) remove(key uint64) (chan<- string, bool) {
+    self.Lock()
+    ch, ok := self.inner[key]
+    delete(self.inner, key)
+    self.Unlock()
+    return ch, ok
+}
+
+type Node struct { // {{{1
     Host    string
     RPort   int
     CPort   int
@@ -69,18 +97,20 @@ func NewMsger(nodeId int, cluster map[int]Node) (*SimpleMsger, error) { // {{{1
 
     return &SimpleMsger {
         nodeId:  nodeId,
-        rListen: mangosock,
-        cListen: netsock,
+        raftCh:  nil,
+        pListen: mangosock,
         peers:   peers,
-        redirs:  redirs,
-        raftch:  nil,
+        pCAddr:  redirs,
+        cListen: netsock,
+        cRespCh: newCRespChanMap(),
+        cRespTO: 30 * time.Second,
         err:     log.New(os.Stderr, "-- ", log.Lshortfile),
     }, nil
 }
 
-// quack like a Messenger {{{1
-func (self *SimpleMsger) Register(raftch chan<- raft.Message) {
-    self.raftch = raftch
+// ---- quack like a Messenger {{{1
+func (self *SimpleMsger) Register(raftCh chan<- raft.Message) {
+    self.raftCh = raftCh
 }
 
 func (self *SimpleMsger) Send(nodeId int, msg raft.Message) {
@@ -100,7 +130,67 @@ func (self *SimpleMsger) BroadcastVoteRequest(msg *raft.VoteRequest) {
 }
 
 func (self *SimpleMsger) Client301(uid uint64, nodeId int) {
+    self.RespondToClient(uid, fmt.Sprintf("ERR301 %v", self.pCAddr[nodeId]))
 }
 
 func (self *SimpleMsger) Client503(uid uint64) {
+    self.RespondToClient(uid, "ERR503")
+}
+
+func (self *SimpleMsger) SpawnListeners() { // {{{1
+    //go self.listenToPeers()
+    go self.listenToClients()
+}
+
+func (self *SimpleMsger) listenToClients() {
+    for {
+        conn, err := self.cListen.Accept()
+        if err != nil {
+            self.err.Print("Fatal error:", err)
+            break
+        }
+        go self.handleClient(conn)
+    }
+}
+
+func (self *SimpleMsger) RespondToClient(uid uint64, msg string) { // {{{1
+    if respCh, ok := self.cRespCh.remove(uid); ok {
+        respCh <- msg // client timeout could happen in parallel
+    }
+}
+
+func (self *SimpleMsger) handleClient(conn net.Conn) { // {{{1
+    rstream := bufio.NewReader(conn)
+    wstream := bufio.NewWriter(conn)
+
+    respond := func(resp string) bool {
+        if _, err := wstream.WriteString(resp + "\r\n"); err != nil { return false }
+        if    err := wstream.Flush();                    err != nil { return false }
+        return true
+    }
+    respCh := make(chan string, 1)
+    defer conn.Close()
+    //if self.raftCh == nil {
+    //    _, _ = wstream.WriteString("ERR503\r\n")
+    //    return
+    //}
+    for {
+        ce, eof := ParseCEntry(rstream)
+        if ce != nil {
+            self.cRespCh.insert(ce.UID, respCh)
+            //self.raftCh <- ce
+            var resp string
+            select {
+            case resp = <-respCh:
+            case <-time.After(self.cRespTO): // timeout
+                resp = "ERR504"
+                self.cRespCh.remove(ce.UID)
+            }
+            if ok := respond(resp); !ok { break }
+        } else if !eof {
+            if ok := respond("ERR400"); !ok { break }
+        } else {
+            break
+        }
+    }
 }
