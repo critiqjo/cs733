@@ -91,7 +91,7 @@ func NewNode( // {{{1
         msger: msger,
         pster: pster,
         machn: machn,
-        err: golog.New(os.Stderr, "err: ", golog.Lshortfile),
+        err: golog.New(os.Stderr, "-- ", golog.Lshortfile),
     }, nil
 }
 
