@@ -402,9 +402,12 @@ func (self *RaftNode) leaderHandler(m Message) { // {{{1
         if msg.Success == true {
             lastIdx, _ := self.logTail()
             if msg.LastModIdx > 0 {
-                self.matchIdx[nodeId] = msg.LastModIdx // assert monotonicity?
-                self.updateCommitIdx()
-                self.applyCommitted()
+                // ignore duplicate/out-of-order messages
+                if msg.LastModIdx > self.matchIdx[nodeId] {
+                    self.matchIdx[nodeId] = msg.LastModIdx
+                    self.updateCommitIdx()
+                    self.applyCommitted()
+                }
             }
             if self.nextIdx[nodeId] <= lastIdx {
                 self.sendAppendEntries(nodeId, 8)
