@@ -214,8 +214,7 @@ func (l idxSlice) Less(i, j int) bool { return l[i] < l[j] }
 
 func (self *RaftNode) updateCommitIdx() {
     var matchIdx []uint64
-    for nodeId, idx := range self.matchIdx {
-        if nodeId == self.id { continue }
+    for _, idx := range self.matchIdx {
         matchIdx = append(matchIdx, idx)
     }
     sort.Sort(idxSlice(matchIdx))
@@ -442,7 +441,6 @@ func (self *RaftNode) leaderHandler(m Message) { // {{{1
         self.logAppend(newIdx, []RaftEntry { RaftEntry { self.term, msg } })
         self.idxOfUid[msg.UID] = newIdx
         for nodeId := range self.nextIdx {
-            if nodeId == self.id { continue }
             nextIdx := self.nextIdx[nodeId]
             if nextIdx == newIdx {
                 self.sendAppendEntries(nodeId, 1)

@@ -34,7 +34,7 @@ type AppendReply struct {
 
 type ClientEntry struct {
     UID uint64
-    Data interface{}
+    Data interface{} // Note: Be careful while deserializing
 }
 
 type VoteRequest struct {
