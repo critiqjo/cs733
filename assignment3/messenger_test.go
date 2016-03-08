@@ -1,7 +1,9 @@
 package main
 
 import (
+    "bufio"
     "github.com/critiqjo/cs733/assignment3/raft"
+    "net"
     "reflect"
     "testing"
 )
@@ -34,7 +36,7 @@ func TestSimple(t *testing.T) { // {{{1
 
     msger1, raftch1 := initTest(t, cluster, 1)
     msger2, raftch2 := initTest(t, cluster, 2)
-    _, raftch3 := initTest(t, cluster, 3)
+    msger3, raftch3 := initTest(t, cluster, 3)
 
     apen := &raft.AppendEntries {
         4, 2, 0, 0, []raft.RaftEntry {
@@ -53,4 +55,20 @@ func TestSimple(t *testing.T) { // {{{1
     assert_eq(t, m, vreq, "VoteReq mismatch", m)
     m = <-raftch3
     assert_eq(t, m, vreq, "VoteReq mismatch", m)
+
+    client3, err := net.Dial("tcp", "127.0.0.1:3457")
+    cresp3 := bufio.NewReader(client3)
+    if err != nil { t.Fatal(err.Error()) }
+    defer client3.Close()
+
+    creq := []byte("read 0x1a2b\r\n")
+    _, err = client3.Write(creq)
+    if err != nil { t.Fatal(err.Error()) }
+    m = <-raftch3
+    assert_eq(t, m, &raft.ClientEntry { UID: 0x1a2b, Data: "read" }, "Bad parsing", m)
+
+    msger3.RespondToClient(0x1a2b, "OK")
+    m, err = cresp3.ReadString('\n')
+    if err != nil { t.Fatal(err.Error()) }
+    assert_eq(t, m, "OK\r\n", "Bad response to client", m)
 }
