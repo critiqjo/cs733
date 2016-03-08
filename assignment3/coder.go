@@ -2,6 +2,9 @@ package main
 
 import (
     "bufio"
+    "bytes"
+    "encoding/binary"
+    "encoding/gob"
     "encoding/json"
     "errors"
     "github.com/critiqjo/cs733/assignment3/raft"
@@ -10,6 +13,7 @@ import (
 )
 
 func Encode(stuff interface{}) ([]byte, error) {
+    // TODO replace json with gob: use gob.Register() for decoding into interface{}
     data, err := json.Marshal(stuff)
     if err != nil { return nil, err }
     switch stuff.(type) {
@@ -88,4 +92,35 @@ func ParseCEntry(rstream *bufio.Reader) (*raft.ClientEntry, bool) {
     }
 
     return nil, false
+}
+
+func LogKeyEnc(val uint64) []byte {
+    buf := bytes.NewBuffer(make([]byte, 0, 8))
+    err := binary.Write(buf, binary.BigEndian, val)
+    if err != nil { panic("Impossible encode error!") }
+    return buf.Bytes()
+}
+
+func LogKeyDec(blob []byte) uint64 {
+    buf := bytes.NewBuffer(blob)
+    val := new(uint64)
+    err := binary.Read(buf, binary.BigEndian, val)
+    if err != nil { panic("(Not so) impossible decode error!") }
+    return *val
+}
+
+func LogValEnc(rentry *raft.RaftEntry) ([]byte, error) {
+    buf := new(bytes.Buffer)
+    enc := gob.NewEncoder(buf)
+    err := enc.Encode(rentry)
+    if err != nil { return nil, err }
+    return buf.Bytes(), nil
+}
+
+func LogValDec(blob []byte) (*raft.RaftEntry, error) {
+    re := new(raft.RaftEntry)
+    dec := gob.NewDecoder(bytes.NewBuffer(blob))
+    err := dec.Decode(re)
+    if err != nil { return nil, err }
+    return re, nil
 }
