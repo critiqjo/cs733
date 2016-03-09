@@ -37,7 +37,8 @@ func InitCoder() {
     gob.RegisterName("CE", new(raft.ClientEntry))
     gob.RegisterName("VQ", new(raft.VoteRequest))
     gob.RegisterName("VP", new(raft.VoteReply))
-    // Register type of ClientEntry.Data if it is not a built-in
+    gob.RegisterName("MR", new(MachnRead))
+    gob.RegisterName("MU", new(MachnUpdate))
 }
 
 // Tries to parse a ClientEntry from stream
@@ -56,17 +57,18 @@ func ParseCEntry(rstream *bufio.Reader) (*raft.ClientEntry, bool) {
         uid, _ := strconv.ParseUint(matches[1], 0, 64)
         return &raft.ClientEntry {
             UID: uid,
-            Data: "read",
+            Data: &MachnRead {},
         }, false
     }
 
-    pat = regexp.MustCompile("^write (0x[0-9a-f]+) ([0-9]+)\r\n$")
+    pat = regexp.MustCompile("^update (0x[0-9a-f]+) ([0-9]+)\r\n$")
     matches = pat.FindStringSubmatch(str)
     if len(matches) > 0 {
         uid, _ := strconv.ParseUint(matches[1], 0, 64)
+        val, _ := strconv.ParseInt(matches[2], 0, 64)
         return &raft.ClientEntry {
             UID: uid,
-            Data: "write " + matches[2],
+            Data: &MachnUpdate { val },
         }, false
     }
 

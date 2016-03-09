@@ -69,7 +69,7 @@ func TestSimpleMsger(t *testing.T) { // {{{1
     _, err = client3.Write(creq)
     if err != nil { t.Fatal(err.Error()) }
     m = <-raftch3
-    assert_eq(t, m, &raft.ClientEntry { UID: 0x1a2b, Data: "read" }, "Bad parsing", m)
+    assert_eq(t, m, &raft.ClientEntry { UID: 0x1a2b, Data: &MachnRead {} }, "Bad parsing", m)
 
     msger3.RespondToClient(0x1a2b, "OK")
     m, err = cresp3.ReadString('\n')

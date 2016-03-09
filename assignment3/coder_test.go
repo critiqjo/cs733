@@ -24,8 +24,8 @@ func TestCoding(t *testing.T) {
     }
     testMsg(&raft.AppendEntries {
         4, 2, 0, 0, []raft.RaftEntry {
-            raft.RaftEntry { 1, &raft.ClientEntry { 1234, "some data" } },
-            raft.RaftEntry { 1, &raft.ClientEntry { 2345, 1234567 } },
+            raft.RaftEntry { 1, &raft.ClientEntry { 1234, &MachnRead {} } },
+            raft.RaftEntry { 1, &raft.ClientEntry { 2345, &MachnUpdate { -2 } } },
             raft.RaftEntry { 4, nil },
         }, 3,
     })
@@ -36,14 +36,14 @@ func TestCoding(t *testing.T) {
 }
 
 func TestParseCEntry(t *testing.T) {
-    buf := bytes.NewBuffer([]byte("write 0x543 345\r\nread 0x542\r\n"))
+    buf := bytes.NewBuffer([]byte("update 0x543 345\r\nread 0x542\r\n"))
     rstream := bufio.NewReader(buf)
     centry, _ := ParseCEntry(rstream)
-    if !reflect.DeepEqual(centry, &raft.ClientEntry { 0x543, "write 345" }) {
+    if !reflect.DeepEqual(centry, &raft.ClientEntry { 0x543, &MachnUpdate { 345 } }) {
         t.Fatal("Bad write parsing!")
     }
     centry, _ = ParseCEntry(rstream)
-    if !reflect.DeepEqual(centry, &raft.ClientEntry { 0x542, "read" }) {
+    if !reflect.DeepEqual(centry, &raft.ClientEntry { 0x542, &MachnRead {} }) {
         t.Fatal("Bad read parsing!")
     }
     centry, eof := ParseCEntry(rstream)
