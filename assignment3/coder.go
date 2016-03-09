@@ -96,10 +96,10 @@ func LogKeyDec(blob []byte) uint64 {
     return *key
 }
 
-func LogValEnc(rentry *raft.RaftEntry) ([]byte, error) {
+func LogValEnc(entry *raft.RaftEntry) ([]byte, error) {
     buf := new(bytes.Buffer)
     enc := gob.NewEncoder(buf)
-    err := enc.Encode(rentry)
+    err := enc.Encode(entry)
     if err != nil { return nil, err }
     return buf.Bytes(), nil
 }

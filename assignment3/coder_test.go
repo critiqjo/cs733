@@ -63,17 +63,17 @@ func TestLogKeyCoding(t *testing.T) {
 }
 
 func TestLogValCoding(t *testing.T) {
-    testEntry := func(rentry *raft.RaftEntry) {
-        blob, err := LogValEnc(rentry)
+    testEntry := func(entry *raft.RaftEntry) {
+        blob, err := LogValEnc(entry)
         if err != nil {
             t.Fatal(err)
         }
-        rentry_dec, err := LogValDec(blob)
+        entry_dec, err := LogValDec(blob)
         if err != nil {
             t.Fatal(err)
         }
-        if !reflect.DeepEqual(rentry, rentry_dec) {
-            t.Fatal("Decoded into something else:", rentry_dec)
+        if !reflect.DeepEqual(entry, entry_dec) {
+            t.Fatal("Decoded into something else:", entry_dec)
         }
     }
     testEntry(&raft.RaftEntry {

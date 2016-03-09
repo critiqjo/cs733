@@ -33,9 +33,18 @@ func TestSimplePster(t *testing.T) {
     ok = pster.LogUpdate(1, entries)
     if !ok { t.Fatal("Failed to persist log entry") }
 
+    fields := raft.RaftFields { Term: 20, VotedFor: 9 }
+    ok = pster.SetFields(fields)
+    if !ok { t.Fatal("Failed to persist fields") }
+
     pster_dup = initPster(t, dbpath)
     entries_dup, ok := pster_dup.LogSlice(1, 4)
     if !ok || !reflect.DeepEqual(entries_dup, entries) {
+        t.Fatal("Changes were not synced with disk!")
+    }
+
+    fields_dup := pster_dup.GetFields()
+    if !reflect.DeepEqual(fields_dup, &fields) {
         t.Fatal("Changes were not synced with disk!")
     }
     pster_dup.Close()
