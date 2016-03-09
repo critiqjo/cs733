@@ -8,7 +8,9 @@ const (
     Leader
 )
 
-// TODO change node id type: uint32 (fixed size)
+// reserved node id (internally used to indicate that no vote was cast)
+// if this value is found while calling NewNode(), it returns an error
+const NilNode uint32 = ^uint32(0)
 
 type RaftEntry struct {
     Term uint64
@@ -20,7 +22,7 @@ type Message interface {}
 
 type AppendEntries struct {
     Term uint64
-    LeaderId int
+    LeaderId uint32
     PrevLogIdx uint64
     PrevLogTerm uint64
     Entries []RaftEntry
@@ -30,7 +32,7 @@ type AppendEntries struct {
 type AppendReply struct {
     Term uint64
     Success bool
-    NodeId int
+    NodeId uint32
     LastModIdx uint64
 }
 
@@ -41,7 +43,7 @@ type ClientEntry struct {
 
 type VoteRequest struct {
     Term uint64
-    CandidId int
+    CandidId uint32
     LastLogIdx uint64
     LastLogTerm uint64
 }
@@ -49,15 +51,15 @@ type VoteRequest struct {
 type VoteReply struct {
     Term uint64
     Granted bool
-    NodeId int
+    NodeId uint32
 }
 
 // Must maintain a map from serverIds to (network) address/socket
 type Messenger interface {
     Register(notifch chan<- Message)
-    Send(node int, msg Message)
+    Send(node uint32, msg Message)
     BroadcastVoteRequest(msg *VoteRequest)
-    Client301(uid uint64, nodeId int) // redirect to another node (possibly the leader)
+    Client301(uid uint64, node uint32) // redirect to another node (possibly the leader)
     Client503(uid uint64) // service temporarily unavailable
 }
 
@@ -81,7 +83,7 @@ type Persister interface { // caching of log could be done by the implementer
 
 type RaftFields struct {
     Term uint64
-    VotedFor int
+    VotedFor uint32
     // configuration details?
 }
 

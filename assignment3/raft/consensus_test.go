@@ -12,9 +12,9 @@ type DummyMsger struct { // {{{1
 }
 
 func (self *DummyMsger) Register(notifch chan<- Message)       { self.raftch = notifch }
-func (self *DummyMsger) Send(nodeId int, msg Message)          { self.testch <- msg }
+func (self *DummyMsger) Send(node uint32, msg Message)         { self.testch <- msg }
 func (self *DummyMsger) BroadcastVoteRequest(msg *VoteRequest) { self.testch <- msg }
-func (self *DummyMsger) Client301(uid uint64, nodeId int)      { } // TODO test!
+func (self *DummyMsger) Client301(uid uint64, node uint32)     { } // TODO test!
 func (self *DummyMsger) Client503(uid uint64)                  { }
 
 func (self *DummyMsger) syncWait(t *testing.T) {
@@ -92,7 +92,7 @@ func initTest() (*RaftNode, *DummyMsger, *DummyPster, *DummyMachn) {
     // Note: Deadlocking due to unbuffered channels is considered a bug!
     msger := &DummyMsger{ nil, make(chan interface{}) } // unbuffered channel
     pster, machn := &DummyPster{}, &DummyMachn{ make(map[uint64]bool) }
-    raft, err := NewNode(0, []int { 0, 1, 2, 3, 4 }, 0, msger, pster, machn) // unbuffered channel
+    raft, err := NewNode(0, []uint32 { 0, 1, 2, 3, 4 }, 0, msger, pster, machn) // unbuffered channel
     if err != nil { panic(err) }
     go raft.Run(func(rs RaftState) time.Duration {
         return time.Duration(400) * time.Millisecond

@@ -12,19 +12,19 @@ import (
 //       All events including timeouts are received on a single channel
 
 type RaftNode struct { // FIXME organize differently?
-    id int // node id
-    peerIds []int
+    id uint32 // node id
+    peerIds []uint32
     // persistent fields
     term uint64
-    votedFor int
+    votedFor uint32
     // volatile fields
     state RaftState
     commitIdx uint64
     lastAppld uint64
     // state-specific fields
-    voteSet map[int]bool // candidate: used as a set -- bool values are not used
-    nextIdx map[int]uint64 // leader
-    matchIdx map[int]uint64 // leader
+    voteSet map[uint32]bool // candidate: used as a set -- bool values are not used
+    nextIdx map[uint32]uint64 // leader
+    matchIdx map[uint32]uint64 // leader
     // extras
     idxOfUid map[uint64]uint64 // uid -> idx map for entries not yet applied
     timer *RaftTimer
@@ -38,18 +38,20 @@ type RaftNode struct { // FIXME organize differently?
 }
 
 func NewNode( // {{{1
-    selfId int, nodeIds []int, notifbuf int,
+    selfId uint32, nodeIds []uint32, notifbuf int,
     msger Messenger, pster Persister, machn Machine,
 ) (*RaftNode, error) {
     rf := pster.GetFields()
-    var peerIds []int
+    var peerIds []uint32
     if len(nodeIds) < 3 {
         return nil, errors.New("Not enough nodes!")
     } else {
-        var pSet = make(map[int]bool)
+        var pSet = make(map[uint32]bool)
         var selfFound bool = false
         for _, peerId := range nodeIds {
-            if peerId == selfId {
+            if peerId == NilNode {
+                return nil, errors.New("NilNode = ^uint32(0) is a reserved nodeId")
+            } else if peerId == selfId {
                 selfFound = true
             } else {
                 pSet[peerId] = true
@@ -66,7 +68,7 @@ func NewNode( // {{{1
         }
     }
     if rf == nil {
-        rf = &RaftFields { 0, -1 }
+        rf = &RaftFields { 0, NilNode }
     }
     if idx, entry := pster.LastEntry(); idx == 0 && entry == nil {
         ok := pster.LogUpdate(0, []RaftEntry { RaftEntry { 0, nil } })
@@ -172,7 +174,7 @@ func (self *RaftNode) logAppend(startIdx uint64, entries []RaftEntry) {
     }
 }
 
-func (self *RaftNode) sendAppendEntries(nodeId, num_entries int) {
+func (self *RaftNode) sendAppendEntries(nodeId uint32, num_entries int) {
     nextIdx := self.nextIdx[nodeId]
     slice, ok := self.pster.LogSlice(nextIdx, num_entries)
     if !ok {
@@ -190,7 +192,7 @@ func (self *RaftNode) sendAppendEntries(nodeId, num_entries int) {
     self.nextIdx[nodeId] += uint64(len(slice))
 }
 
-func (self *RaftNode) setTermAndVote(term uint64, vote int) {
+func (self *RaftNode) setTermAndVote(term uint64, vote uint32) {
     self.term = term
     self.votedFor = vote
     ok := self.pster.SetFields(RaftFields { Term: term, VotedFor: vote })
@@ -199,7 +201,7 @@ func (self *RaftNode) setTermAndVote(term uint64, vote int) {
     }
 }
 
-func (self *RaftNode) setVote(vote int) {
+func (self *RaftNode) setVote(vote uint32) {
     self.setTermAndVote(self.term, vote)
 }
 
@@ -272,10 +274,10 @@ func (self *RaftNode) followerHandler(m Message) { // {{{1
             self.msger.Send(msg.CandidId, &VoteReply { self.term, false, self.id })
         } else {
             if msg.Term > self.term {
-                self.setTermAndVote(msg.Term, -1)
+                self.setTermAndVote(msg.Term, NilNode)
             }
 
-            if self.votedFor >= 0 {
+            if self.votedFor != NilNode {
                 self.msger.Send(msg.CandidId, &VoteReply { self.term, false, self.id })
             } else if !self.isUpToDate(msg) {
                 self.msger.Send(msg.CandidId, &VoteReply { self.term, false, self.id })
@@ -293,7 +295,7 @@ func (self *RaftNode) followerHandler(m Message) { // {{{1
         break
 
     case *ClientEntry:
-        if self.votedFor > -1 {
+        if self.votedFor != NilNode {
             self.msger.Client301(msg.UID, self.votedFor)
         } else {
             self.msger.Client503(msg.UID)
@@ -348,8 +350,8 @@ func (self *RaftNode) candidateHandler(m Message) { // {{{1
                         self.idxOfUid[entry.CEntry.UID] = idx
                     }
                 }
-                self.matchIdx = make(map[int]uint64)
-                self.nextIdx = make(map[int]uint64)
+                self.matchIdx = make(map[uint32]uint64)
+                self.nextIdx = make(map[uint32]uint64)
                 for _, nodeId := range self.peerIds {
                     self.matchIdx[nodeId] = 0
                     self.nextIdx[nodeId] = lastIdx + 1
@@ -359,7 +361,7 @@ func (self *RaftNode) candidateHandler(m Message) { // {{{1
             }
         } else if msg.Term > self.term {
             self.err.Print("fatal: unsound vote reply; ignoring!!!")
-            self.setTermAndVote(msg.Term, -1)
+            self.setTermAndVote(msg.Term, NilNode)
             self.state = Follower
         }
 
@@ -367,7 +369,7 @@ func (self *RaftNode) candidateHandler(m Message) { // {{{1
         self.msger.Client503(msg.UID)
 
     case *timeout:
-        self.voteSet = make(map[int]bool)
+        self.voteSet = make(map[uint32]bool)
         self.voteSet[self.id] = true
         self.setTermAndVote(self.term + 1, self.id)
         lastIdx, lastEntry := self.logTail()
@@ -417,7 +419,7 @@ func (self *RaftNode) leaderHandler(m Message) { // {{{1
             }
             self.sendAppendEntries(nodeId, 0)
         } else if msg.Term > self.term {
-            self.setTermAndVote(msg.Term, -1)
+            self.setTermAndVote(msg.Term, NilNode)
             self.state = Follower
             self.timerReset()
         } // else outdated message?
