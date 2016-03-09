@@ -9,6 +9,10 @@ import (
 )
 
 // ---- utility functions {{{1
+func init() {
+    InitCoder()
+}
+
 func assert(t *testing.T, e bool, args ...interface{}) {
     // Unidiomatic: https://golang.org/doc/faq#testing_framework
     if !e { t.Fatal(args...) }
@@ -19,7 +23,6 @@ func assert_eq(t *testing.T, x, y interface{}, args ...interface{}) {
 }
 
 func initMsger(t *testing.T, cluster map[int]Node, nodeId int) (*SimpleMsger, chan raft.Message) {
-    InitCoder()
     raftch := make(chan raft.Message)
     msger, err := NewMsger(nodeId, cluster)
     if err != nil { t.Fatal("Creating messenger failed:", err) }

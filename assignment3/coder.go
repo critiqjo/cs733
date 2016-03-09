@@ -41,7 +41,7 @@ func InitCoder() {
 }
 
 // Tries to parse a ClientEntry from stream
-// if connection is dead, then returns (nil, true)
+// if connection is closed (eof), then returns (nil, true)
 // else if parsing succeeds, then returns (<parsed entry>, false)
 // else returns (nil, false)
 func ParseCEntry(rstream *bufio.Reader) (*raft.ClientEntry, bool) {
