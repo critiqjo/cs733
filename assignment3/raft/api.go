@@ -91,16 +91,18 @@ type RaftFields struct {
 
 // should be internally linked with the Messenger object to respond to clients
 type Machine interface {
-    // if the request with uid has been processed or queued, then return true,
-    // and respond to the client appropriately
-    RespondIfSeen(uid uint64) bool
+    // If the request with uid has been processed or queued, then return true
+    // (so that the newly arrive request can be ignored, otherwise the request
+    // will be replicated), and respond to the client appropriately
+    TryRespond(uid uint64) bool
 
-    // lazily apply operations; after this call, RespondIfSeen should return
-    // true for all of these uids regardless of whether the operation has been
-    // applied or is still in queue
-    ApplyLazy([]ClientEntry)
+    // Execute commands (lazily), and respond to clients with results. After
+    // this call returns, TryRespond should return true for all of these uids
+    // regardless of whether the operation has been applied or it is still in
+    // the lazy queue.
+    Execute([]ClientEntry)
 
-    //TakeSnapshot(*LogState) // should be properly serialized with Apply
+    //TakeSnapshot(*LogState) // should be properly serialized with Execute
     //LoadSnapshot() *LogState
     //SerializeSnapshot() ByteStream?
 }

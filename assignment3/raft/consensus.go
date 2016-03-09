@@ -157,7 +157,7 @@ func (self *RaftNode) applyCommitted() {
             }
         }
         if len(cEntries) > 0 {
-            self.machn.ApplyLazy(cEntries)
+            self.machn.Execute(cEntries)
         }
         self.lastAppld = self.commitIdx
     }
@@ -428,7 +428,7 @@ func (self *RaftNode) leaderHandler(m Message) { // {{{1
         break
 
     case *ClientEntry:
-        if self.machn.RespondIfSeen(msg.UID) {
+        if self.machn.TryRespond(msg.UID) {
             break
         } else if logIdx, ok := self.idxOfUid[msg.UID]; ok {
             if self.log(logIdx).CEntry.UID != msg.UID {

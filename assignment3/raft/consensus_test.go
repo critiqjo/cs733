@@ -62,12 +62,12 @@ type DummyMachn struct { // {{{1
     uidSet map[uint64]bool
 }
 
-func (self *DummyMachn) ApplyLazy(entries []ClientEntry) {
+func (self *DummyMachn) Execute(entries []ClientEntry) {
     for _, cEntry := range entries {
         self.uidSet[cEntry.UID] = true
     }
 }
-func (self *DummyMachn) RespondIfSeen(uid uint64) bool {
+func (self *DummyMachn) TryRespond(uid uint64) bool {
     return self.hasUID(uid)
 }
 func (self *DummyMachn) hasUID(uid uint64) bool {
