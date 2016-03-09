@@ -115,7 +115,7 @@ func (self *SimpleMsger) Register(raftCh chan<- raft.Message) {
 
 func (self *SimpleMsger) Send(nodeId int, msg raft.Message) {
     if sock, ok := self.peers[nodeId]; ok {
-        data, err := Encode(msg)
+        data, err := MsgEnc(msg)
         if err == nil {
             if err := sock.Send(data); err != nil {
                 self.err.Print(err)
@@ -154,7 +154,7 @@ func (self *SimpleMsger) listenToPeers() {
             self.err.Print("Fatal error:", err)
             break
         }
-        msg, err := Decode(data)
+        msg, err := MsgDec(data)
         if err == nil {
             self.raftCh <- msg
         } else {

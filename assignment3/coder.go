@@ -5,60 +5,39 @@ import (
     "bytes"
     "encoding/binary"
     "encoding/gob"
-    "encoding/json"
-    "errors"
     "github.com/critiqjo/cs733/assignment3/raft"
     "regexp"
     "strconv"
 )
 
-func Encode(stuff interface{}) ([]byte, error) {
-    // TODO replace json with gob: use gob.Register() for decoding into interface{}
-    data, err := json.Marshal(stuff)
-    if err != nil { return nil, err }
-    switch stuff.(type) {
-    case *raft.AppendEntries:
-        return append([]byte("AE"), data...), nil
-    case *raft.AppendReply:
-        return append([]byte("AP"), data...), nil
-    case *raft.ClientEntry:
-        return append([]byte("CE"), data...), nil
-    case *raft.VoteRequest:
-        return append([]byte("VQ"), data...), nil
-    case *raft.VoteReply:
-        return append([]byte("VP"), data...), nil
-    default:
-        return nil, errors.New("Unknown stuff!")
-    }
+type happyWrap struct { // make gob happy! Is there an easier way?
+    Smile interface{}
 }
 
-func Decode(data []byte) (raft.Message, error) {
-    if len(data) < 2 { return nil, errors.New("Got nothin!") }
-    hint := string(data[:2])
-    switch hint {
-    case "AE":
-        var msg raft.AppendEntries
-        err := json.Unmarshal(data[2:], &msg)
-        return &msg, err
-    case "AP":
-        var msg raft.AppendReply
-        err := json.Unmarshal(data[2:], &msg)
-        return &msg, err
-    case "CE":
-        var msg raft.ClientEntry
-        err := json.Unmarshal(data[2:], &msg)
-        return &msg, err
-    case "VQ":
-        var msg raft.VoteRequest
-        err := json.Unmarshal(data[2:], &msg)
-        return &msg, err
-    case "VP":
-        var msg raft.VoteReply
-        err := json.Unmarshal(data[2:], &msg)
-        return &msg, err
-    default:
-        return nil, errors.New("Unintelligible data!")
-    }
+func MsgEnc(msg raft.Message) ([]byte, error) {
+    buf := new(bytes.Buffer)
+    enc := gob.NewEncoder(buf)
+    err := enc.Encode(&happyWrap { msg })
+    if err != nil { return nil, err }
+    return buf.Bytes(), nil
+}
+
+func MsgDec(blob []byte) (raft.Message, error) {
+    var happy = new(happyWrap)
+    dec := gob.NewDecoder(bytes.NewBuffer(blob))
+    err := dec.Decode(happy)
+    if err != nil { return nil, err }
+    return happy.Smile, nil
+}
+
+// This should be called once to Register types with gob
+func InitCoder() {
+    gob.RegisterName("AE", new(raft.AppendEntries))
+    gob.RegisterName("AP", new(raft.AppendReply))
+    gob.RegisterName("CE", new(raft.ClientEntry))
+    gob.RegisterName("VQ", new(raft.VoteRequest))
+    gob.RegisterName("VP", new(raft.VoteReply))
+    // Register type of ClientEntry.Data if it is not a built-in
 }
 
 // Tries to parse a ClientEntry from stream
