@@ -65,23 +65,23 @@ func (self *SimplePster) LogSlice(startIdx uint64, n int) ([]raft.RaftEntry, boo
 
 func (self *SimplePster) LogUpdate(startIdx uint64, slice []raft.RaftEntry) bool {
     tailItem, _ := self.rlog.MaxItem(false)
-    tailIdx := LogKeyDec(tailItem.Key)
-    var valid = false
-    if tailItem == nil {
-        valid = startIdx == 0
-    } else if tailIdx + 1 >= startIdx {
-        valid = true
-    } else {
-        return false
+    var tailIdx int64 = -1 // physically not possible to overflow int64 anyway
+    if tailItem != nil {
+        tailIdx = int64(LogKeyDec(tailItem.Key))
     }
 
-    if valid {
-        idx := startIdx + uint64(len(slice))
-        for ; idx <= tailIdx; idx += 1 { // truncate
-            deleted, _ := self.rlog.Delete(LogKeyEnc(idx))
-            if !deleted { panic("Corrupt log!") }
+    if tailIdx + 1 >= int64(startIdx) {
+        if len(slice) == 0 {
+            return true // nothing to update
         }
-        idx = startIdx
+        if tailIdx >= 0 { // truncate
+            newTailIdx := startIdx + uint64(len(slice)) - 1
+            for idx := uint64(tailIdx); idx > newTailIdx; idx -= 1 {
+                deleted, _ := self.rlog.Delete(LogKeyEnc(idx))
+                if !deleted { panic("Corrupt log!") }
+            }
+        }
+        idx := startIdx
         for _, entry := range slice { // append/update
             blob, err := LogValEnc(&entry)
             if err != nil { panic("Impossible encode error!!") }
@@ -124,4 +124,8 @@ func NewPster(dbpath string) (*SimplePster, error) { // {{{1
         rlog: store.SetCollection("rlog", nil),
         rfields: store.SetCollection("rfields", nil),
     }, nil
+}
+
+func (self *SimplePster) Close() { // {{{1
+    self.store.Close()
 }
