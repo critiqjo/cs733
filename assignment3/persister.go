@@ -40,19 +40,72 @@ func (self *SimplePster) LastEntry() (uint64, *raft.RaftEntry) {
 }
 
 func (self *SimplePster) LogSlice(startIdx uint64, n int) ([]raft.RaftEntry, bool) {
-    return nil, false
+    if n == 0 {
+        item, _ := self.rlog.GetItem(LogKeyEnc(startIdx - 1), false)
+        if item != nil {
+            return nil, true
+        } else {
+            return nil, false
+        }
+    } else {
+        var entries []raft.RaftEntry
+        var idx = startIdx
+        iter_cb := func(item *gkvlite.Item) bool {
+            if idx != LogKeyDec(item.Key) { panic("Corrupt log!") }
+            entry, err := LogValDec(item.Val)
+            if err != nil { panic("Corrupt log entry!") }
+            entries = append(entries, *entry)
+            idx += 1
+            return idx - startIdx < uint64(n)
+        }
+        self.rlog.VisitItemsAscend(LogKeyEnc(startIdx), true, iter_cb)
+        return entries, true
+    }
 }
 
 func (self *SimplePster) LogUpdate(startIdx uint64, slice []raft.RaftEntry) bool {
+    tailItem, _ := self.rlog.MaxItem(false)
+    tailIdx := LogKeyDec(tailItem.Key)
+    var valid = false
+    if tailItem == nil {
+        valid = startIdx == 0
+    } else if tailIdx + 1 >= startIdx {
+        valid = true
+    } else {
+        return false
+    }
+
+    if valid {
+        idx := startIdx + uint64(len(slice))
+        for ; idx <= tailIdx; idx += 1 { // truncate
+            deleted, _ := self.rlog.Delete(LogKeyEnc(idx))
+            if !deleted { panic("Corrupt log!") }
+        }
+        idx = startIdx
+        for _, entry := range slice { // append/update
+            blob, err := LogValEnc(&entry)
+            if err != nil { panic("Impossible encode error!!") }
+            err = self.rlog.Set(LogKeyEnc(idx), blob)
+            if err != nil { return false } // panic??
+            idx += 1
+        }
+        err := self.store.Flush()
+        return err == nil
+    }
     return false
 }
 
 func (self *SimplePster) GetFields() *raft.RaftFields {
-    return nil
+    blob, _ := self.rfields.Get([]byte {0})
+    if blob == nil { return nil }
+    return FieldsDec(blob)
 }
 
-func (self *SimplePster) SetFields(raft.RaftFields) bool {
-    return false
+func (self *SimplePster) SetFields(fields raft.RaftFields) bool {
+    err := self.rfields.Set([]byte {0}, FieldsEnc(&fields))
+    if err != nil { return false }
+    err = self.store.Flush()
+    return err == nil
 }
 
 func NewPster(dbpath string) (*SimplePster, error) { // {{{1

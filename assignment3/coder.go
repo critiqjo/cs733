@@ -73,19 +73,27 @@ func ParseCEntry(rstream *bufio.Reader) (*raft.ClientEntry, bool) {
     return nil, false
 }
 
-func LogKeyEnc(val uint64) []byte {
-    buf := bytes.NewBuffer(make([]byte, 0, 8))
+func binaryMustEnc(val interface{}, initCap int) []byte {
+    buf := bytes.NewBuffer(make([]byte, 0, initCap))
     err := binary.Write(buf, binary.BigEndian, val)
     if err != nil { panic("Impossible encode error!") }
     return buf.Bytes()
 }
 
-func LogKeyDec(blob []byte) uint64 {
+func binaryMustDec(blob []byte, val interface{}) {
     buf := bytes.NewBuffer(blob)
-    val := new(uint64)
     err := binary.Read(buf, binary.BigEndian, val)
-    if err != nil { panic("(Not so) impossible decode error!") }
-    return *val
+    if err != nil { panic("Impossible decode error!") }
+}
+
+func LogKeyEnc(key uint64) []byte {
+    return binaryMustEnc(key, 8)
+}
+
+func LogKeyDec(blob []byte) uint64 {
+    key := new(uint64)
+    binaryMustDec(blob, key)
+    return *key
 }
 
 func LogValEnc(rentry *raft.RaftEntry) ([]byte, error) {
@@ -102,4 +110,14 @@ func LogValDec(blob []byte) (*raft.RaftEntry, error) {
     err := dec.Decode(re)
     if err != nil { return nil, err }
     return re, nil
+}
+
+func FieldsEnc(fields *raft.RaftFields) []byte {
+    return binaryMustEnc(fields, 12)
+}
+
+func FieldsDec(blob []byte) *raft.RaftFields {
+    fields := new(raft.RaftFields)
+    binaryMustDec(blob, fields)
+    return fields
 }

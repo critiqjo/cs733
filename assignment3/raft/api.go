@@ -8,6 +8,8 @@ const (
     Leader
 )
 
+// TODO change node id type: uint32 (fixed size)
+
 type RaftEntry struct {
     Term uint64
     CEntry *ClientEntry
