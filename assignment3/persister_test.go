@@ -34,7 +34,7 @@ func TestSimplePster(t *testing.T) {
     if !ok { t.Fatal("Failed to persist log entry") }
 
     pster_dup = initPster(t, dbpath)
-    entries_dup, ok := pster_dup.LogSlice(1, 3)
+    entries_dup, ok := pster_dup.LogSlice(1, 4)
     if !ok || !reflect.DeepEqual(entries_dup, entries) {
         t.Fatal("Changes were not synced with disk!")
     }

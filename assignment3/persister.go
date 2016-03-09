@@ -6,11 +6,22 @@ import (
     "os"
 )
 
+const NilIdx = ^uint64(0)
+
 type SimplePster struct {
     file    *os.File
     store   *gkvlite.Store
     rlog    *gkvlite.Collection
     rfields *gkvlite.Collection
+}
+
+func (self *SimplePster) lastIdx() uint64 { // {{{1
+    tailItem, _ := self.rlog.MaxItem(false)
+    var tailIdx uint64 = NilIdx
+    if tailItem != nil {
+        tailIdx = uint64(LogKeyDec(tailItem.Key))
+    }
+    return tailIdx
 }
 
 // ---- quack like a Persister {{{1
@@ -39,44 +50,49 @@ func (self *SimplePster) LastEntry() (uint64, *raft.RaftEntry) {
     return idx, entry
 }
 
-func (self *SimplePster) LogSlice(startIdx uint64, n int) ([]raft.RaftEntry, bool) {
-    if n == 0 {
-        item, _ := self.rlog.GetItem(LogKeyEnc(startIdx - 1), false)
-        if item != nil {
+func (self *SimplePster) LogSlice(startIdx uint64, endIdx uint64) ([]raft.RaftEntry, bool) {
+    lastIdx := self.lastIdx()
+    if lastIdx == NilIdx {
+        if startIdx == 0 && endIdx == 0 {
             return nil, true
         } else {
             return nil, false
         }
-    } else {
-        var entries []raft.RaftEntry
-        var idx = startIdx
-        iter_cb := func(item *gkvlite.Item) bool {
-            if idx != LogKeyDec(item.Key) { panic("Corrupt log!") }
-            entry, err := LogValDec(item.Val)
-            if err != nil { panic("Corrupt log entry!") }
-            entries = append(entries, *entry)
-            idx += 1
-            return idx - startIdx < uint64(n)
-        }
-        self.rlog.VisitItemsAscend(LogKeyEnc(startIdx), true, iter_cb)
-        return entries, true
+    } else if startIdx > endIdx {
+        return nil, false
+    } else if startIdx == lastIdx + 1 {
+        return nil, true
+    } else if endIdx > lastIdx + 1 {
+        endIdx = lastIdx + 1
     }
+    var entries []raft.RaftEntry
+    var idx = startIdx
+    iter_cb := func(item *gkvlite.Item) bool {
+        if idx >= endIdx { return false }
+        if idx != LogKeyDec(item.Key) { // sanity check
+            panic("Corrupted log!")
+        }
+
+        entry, err := LogValDec(item.Val)
+        if err != nil { panic("Corrupted log entry!") }
+        entries = append(entries, *entry)
+        idx += 1
+        return true
+    }
+    self.rlog.VisitItemsAscend(LogKeyEnc(startIdx), true, iter_cb)
+    return entries, true
 }
 
 func (self *SimplePster) LogUpdate(startIdx uint64, slice []raft.RaftEntry) bool {
-    tailItem, _ := self.rlog.MaxItem(false)
-    var tailIdx int64 = -1 // physically not possible to overflow int64 anyway
-    if tailItem != nil {
-        tailIdx = int64(LogKeyDec(tailItem.Key))
-    }
+    lastIdx := self.lastIdx()
 
-    if tailIdx + 1 >= int64(startIdx) {
+    if (lastIdx == NilIdx && startIdx == 0) || (lastIdx + 1 >= startIdx) {
         if len(slice) == 0 {
             return true // nothing to update
         }
-        if tailIdx >= 0 { // truncate
+        if lastIdx != NilIdx { // truncate
             newTailIdx := startIdx + uint64(len(slice)) - 1
-            for idx := uint64(tailIdx); idx > newTailIdx; idx -= 1 {
+            for idx := lastIdx; idx > newTailIdx; idx -= 1 {
                 deleted, _ := self.rlog.Delete(LogKeyEnc(idx))
                 if !deleted { panic("Corrupt log!") }
             }

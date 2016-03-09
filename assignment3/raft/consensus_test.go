@@ -34,21 +34,18 @@ func (self *DummyPster) LastEntry() (uint64, *RaftEntry) {
     lastIdx := len(self.log) - 1
     return uint64(lastIdx), &self.log[lastIdx]
 }
-func (self *DummyPster) LogSlice(startIdx uint64, n int) ([]RaftEntry, bool) {
-    if n == 0 {
-        if int(startIdx) < len(self.log) + 1 {
-            return nil, true
-        }
-    } else if n > 0 {
-        if int(startIdx) < len(self.log) {
-            endIdx := int(startIdx) + n
-            if endIdx > len(self.log) {
-                endIdx = len(self.log)
-            }
-            return self.log[startIdx:endIdx], true
-        }
+func (self *DummyPster) LogSlice(startIdx uint64, endIdx uint64) ([]RaftEntry, bool) {
+    if startIdx > endIdx {
+        return nil, false
+    } else if startIdx == uint64(len(self.log)) {
+        return nil, true
+    } else if endIdx > uint64(len(self.log)) {
+        endIdx = uint64(len(self.log))
     }
-    return nil, false
+    if startIdx == endIdx { // this is only to pass tests below, because
+        return nil, true // nil != self.log[i:i] in the eyes of reflect
+    }
+    return self.log[startIdx:endIdx], true
 }
 func (self *DummyPster) LogUpdate(startIdx uint64, slice []RaftEntry) bool {
     if startIdx == 0 {

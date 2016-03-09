@@ -176,7 +176,7 @@ func (self *RaftNode) logAppend(startIdx uint64, entries []RaftEntry) {
 
 func (self *RaftNode) sendAppendEntries(nodeId uint32, num_entries int) {
     nextIdx := self.nextIdx[nodeId]
-    slice, ok := self.pster.LogSlice(nextIdx, num_entries)
+    entries, ok := self.pster.LogSlice(nextIdx, nextIdx + uint64(num_entries))
     if !ok {
         self.err.Print("fatal: log index out of bounds; ignoring!!!")
         return
@@ -186,10 +186,10 @@ func (self *RaftNode) sendAppendEntries(nodeId uint32, num_entries int) {
         LeaderId: self.id,
         PrevLogIdx: nextIdx - 1,
         PrevLogTerm: self.log(nextIdx - 1).Term,
-        Entries: slice,
+        Entries: entries,
         CommitIdx: self.commitIdx,
     })
-    self.nextIdx[nodeId] += uint64(len(slice))
+    self.nextIdx[nodeId] += uint64(len(entries))
 }
 
 func (self *RaftNode) setTermAndVote(term uint64, vote uint32) {

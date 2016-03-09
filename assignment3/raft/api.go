@@ -69,10 +69,12 @@ type Persister interface { // caching of log could be done by the implementer
     // if log is empty, return (0, nil); otherwise, return (last log index, last log entry)
     LastEntry() (uint64, *RaftEntry)
 
-    // if n > 0 and startIdx is within bounds, return (slice, true) where 0 < len(slice) <= n
-    // if n = 0 and startIdx-1 is within bounds, return (nil, true)
-    // otherwise, return (nil, false)
-    LogSlice(startIdx uint64, n int) ([]RaftEntry, bool)
+    // if (first index <= startIdx <= last index + 1) and startIdx <= endIdx,
+    //      then return (slice, true) where slice is end-exclusive
+    // otherwise return (nil, false)
+    // note1: (endIdx > last index) is ok (i.e. return as much as available)
+    // note2: (startIdx = last index + 1 <= endIdx) should return (nil, true)
+    LogSlice(startIdx uint64, endIdx uint64) ([]RaftEntry, bool)
 
     // Append log entries (possibly after truncating the log from startIdx)
     LogUpdate(startIdx uint64, slice []RaftEntry) bool
