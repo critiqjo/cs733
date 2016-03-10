@@ -17,11 +17,11 @@ import (
 )
 
 type SimpleMsger struct {
-    nodeId  int
+    nodeId  uint32
     raftCh  chan<- raft.Message
     pListen mangos.Socket
-    peers   map[int]mangos.Socket
-    pCAddr  map[int]string // peer's client socket address map
+    peers   map[uint32]mangos.Socket
+    pCAddr  map[uint32]string // peer's client socket address map
     cListen net.Listener
     cRespCh *cRespChanMap
     cRespTO time.Duration // response timeout
@@ -52,12 +52,12 @@ func (self *cRespChanMap) remove(key uint64) (chan<- string, bool) {
 }
 
 type Node struct { // {{{1
-    Host    string
-    RPort   int
-    CPort   int
+    Host    string  `json:"host-ip"`
+    PPort   int     `json:"peer-port"`
+    CPort   int     `json:"client-port"`
 }
 
-func NewMsger(nodeId int, cluster map[int]Node) (*SimpleMsger, error) { // {{{1
+func NewMsger(nodeId uint32, cluster map[uint32]Node) (*SimpleMsger, error) { // {{{1
     var mangosock mangos.Socket
     var err error
     if mangosock, err = pull.NewSocket(); err != nil {
@@ -66,20 +66,20 @@ func NewMsger(nodeId int, cluster map[int]Node) (*SimpleMsger, error) { // {{{1
     mangosock.AddTransport(tcp.NewTransport())
     node, ok := cluster[nodeId]
     if !ok { return nil, errors.New("nodeId not in cluster") }
-    listenAddr := fmt.Sprintf("tcp://%v:%v", node.Host, node.RPort)
+    listenAddr := fmt.Sprintf("tcp://%v:%v", node.Host, node.PPort)
     if err = mangosock.Listen(listenAddr); err != nil {
         return nil, err
     }
 
-    var peers = make(map[int]mangos.Socket)
-    var redirs = make(map[int]string)
+    var peers = make(map[uint32]mangos.Socket)
+    var redirs = make(map[uint32]string)
     for peerId, peerNode := range cluster {
         if peerId != nodeId {
             var sock mangos.Socket
             if sock, err = push.NewSocket(); err != nil {
                 return nil, err
             }
-            peerAddr := fmt.Sprintf("tcp://%v:%v", peerNode.Host, peerNode.RPort)
+            peerAddr := fmt.Sprintf("tcp://%v:%v", peerNode.Host, peerNode.PPort)
             sock.AddTransport(tcp.NewTransport())
             if err = sock.Dial(peerAddr); err != nil {
                 return nil, err
@@ -113,7 +113,7 @@ func (self *SimpleMsger) Register(raftCh chan<- raft.Message) {
     self.raftCh = raftCh
 }
 
-func (self *SimpleMsger) Send(nodeId int, msg raft.Message) {
+func (self *SimpleMsger) Send(nodeId uint32, msg raft.Message) {
     if sock, ok := self.peers[nodeId]; ok {
         data, err := MsgEnc(msg)
         if err == nil {
@@ -134,7 +134,7 @@ func (self *SimpleMsger) BroadcastVoteRequest(msg *raft.VoteRequest) {
     }
 }
 
-func (self *SimpleMsger) Client301(uid uint64, nodeId int) {
+func (self *SimpleMsger) Client301(uid uint64, nodeId uint32) {
     self.RespondToClient(uid, fmt.Sprintf("ERR301 %v", self.pCAddr[nodeId]))
 }
 
@@ -155,6 +155,7 @@ func (self *SimpleMsger) listenToPeers() {
             break
         }
         msg, err := MsgDec(data)
+        self.err.Print("Received ", msg)
         if err == nil {
             self.raftCh <- msg
         } else {
@@ -196,6 +197,7 @@ func (self *SimpleMsger) handleClient(conn net.Conn) { // {{{1
         return
     }
     for {
+        // FIXME have a read deadline?
         ce, eof := ParseCEntry(rstream)
         if ce != nil {
             self.cRespCh.insert(ce.UID, respCh)
