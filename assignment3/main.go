@@ -30,7 +30,6 @@ func main() {
         fmt.Printf("Error parsing json file: %v\n", err.Error())
         os.Exit(1)
     }
-    fmt.Println(cluster_json)
 
     selfId, err := strconv.ParseUint(args[3], 10, 32)
     if err != nil {
@@ -49,7 +48,6 @@ func main() {
         cluster[uint32(nodeId)] = nodeConf
         nodeIds = append(nodeIds, uint32(nodeId))
     }
-    fmt.Println(cluster)
 
     logfile := args[2]
 

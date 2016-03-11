@@ -6,10 +6,6 @@ import (
     "fmt"
     "log"
     "github.com/critiqjo/cs733/assignment3/raft"
-    "github.com/go-mangos/mangos"
-    "github.com/go-mangos/mangos/protocol/pull"
-    "github.com/go-mangos/mangos/protocol/push"
-    "github.com/go-mangos/mangos/transport/tcp"
     "net"
     "os"
     "sync"
@@ -19,8 +15,8 @@ import (
 type SimpleMsger struct {
     nodeId  uint32
     raftCh  chan<- raft.Message
-    pListen mangos.Socket
-    peers   map[uint32]mangos.Socket
+    pListen net.Listener
+    peers   map[uint32]*WtfPush
     pCAddr  map[uint32]string // peer's client socket address map
     cListen net.Listener
     cRespCh *cRespChanMap
@@ -58,39 +54,26 @@ type Node struct { // {{{1
 }
 
 func NewMsger(nodeId uint32, cluster map[uint32]Node) (*SimpleMsger, error) { // {{{1
-    var mangosock mangos.Socket
-    var err error
-    if mangosock, err = pull.NewSocket(); err != nil {
-        return nil, err
-    }
-    mangosock.AddTransport(tcp.NewTransport())
     node, ok := cluster[nodeId]
     if !ok { return nil, errors.New("nodeId not in cluster") }
-    listenAddr := fmt.Sprintf("tcp://%v:%v", node.Host, node.PPort)
-    if err = mangosock.Listen(listenAddr); err != nil {
-        return nil, err
-    }
+    listenAddr := fmt.Sprintf("%v:%v", node.Host, node.PPort)
+    pconn, err := net.Listen("tcp", listenAddr)
+    if err != nil { return nil, err }
 
-    var peers = make(map[uint32]mangos.Socket)
+    var peers = make(map[uint32]*WtfPush)
     var redirs = make(map[uint32]string)
     for peerId, peerNode := range cluster {
         if peerId != nodeId {
-            var sock mangos.Socket
-            if sock, err = push.NewSocket(); err != nil {
-                return nil, err
-            }
-            peerAddr := fmt.Sprintf("tcp://%v:%v", peerNode.Host, peerNode.PPort)
-            sock.AddTransport(tcp.NewTransport())
-            if err = sock.Dial(peerAddr); err != nil {
-                return nil, err
-            }
-            peers[peerId] = sock
+            peerAddr := fmt.Sprintf("%v:%v", peerNode.Host, peerNode.PPort)
+            wtfpush, err := NewWtfPush(peerAddr)
+            if err != nil { return nil, err }
+            peers[peerId] = wtfpush
             redirs[peerId] = fmt.Sprintf("%v:%v", peerNode.Host, peerNode.CPort)
         }
     }
 
-    var netsock net.Listener
-    netsock, err = net.Listen("tcp", fmt.Sprintf(":%v", node.CPort))
+    var cconn net.Listener
+    cconn, err = net.Listen("tcp", fmt.Sprintf(":%v", node.CPort))
     if err != nil {
         return nil, err
     }
@@ -98,10 +81,10 @@ func NewMsger(nodeId uint32, cluster map[uint32]Node) (*SimpleMsger, error) { //
     return &SimpleMsger {
         nodeId:  nodeId,
         raftCh:  nil,
-        pListen: mangosock,
+        pListen: pconn,
         peers:   peers,
         pCAddr:  redirs,
-        cListen: netsock,
+        cListen: cconn,
         cRespCh: newCRespChanMap(),
         cRespTO: 30 * time.Second,
         err:     log.New(os.Stderr, "-- ", log.Lshortfile),
@@ -114,12 +97,10 @@ func (self *SimpleMsger) Register(raftCh chan<- raft.Message) {
 }
 
 func (self *SimpleMsger) Send(nodeId uint32, msg raft.Message) {
-    if sock, ok := self.peers[nodeId]; ok {
+    if wtfc, ok := self.peers[nodeId]; ok {
         data, err := MsgEnc(msg)
         if err == nil {
-            if err := sock.Send(data); err != nil {
-                self.err.Print(err)
-            }
+            wtfc.Push(data)
         } else {
             self.err.Print(err)
         }
@@ -143,19 +124,35 @@ func (self *SimpleMsger) Client503(uid uint64) {
 }
 
 func (self *SimpleMsger) SpawnListeners() { // {{{1
+    for _, peer := range self.peers {
+        go peer.Run()
+    }
     go self.listenToPeers()
     go self.listenToClients()
 }
 
 func (self *SimpleMsger) listenToPeers() {
     for {
-        data, err := self.pListen.Recv()
+        conn, err := self.pListen.Accept()
+        if err != nil {
+            self.err.Print("Fatal error:", err)
+            break
+        }
+        go self.handlePeer(conn)
+    }
+}
+
+func (self *SimpleMsger) handlePeer(conn net.Conn) {
+    rstream := bufio.NewReader(conn)
+    defer conn.Close()
+
+    for {
+        data, err := RecvBlob(rstream)
         if err != nil {
             self.err.Print("Fatal error:", err)
             break
         }
         msg, err := MsgDec(data)
-        self.err.Print("Received ", msg)
         if err == nil {
             self.raftCh <- msg
         } else {
@@ -175,15 +172,10 @@ func (self *SimpleMsger) listenToClients() {
     }
 }
 
-func (self *SimpleMsger) RespondToClient(uid uint64, msg string) { // {{{1
-    if respCh, ok := self.cRespCh.remove(uid); ok {
-        respCh <- msg // client timeout could happen in parallel
-    }
-}
-
 func (self *SimpleMsger) handleClient(conn net.Conn) { // {{{1
     rstream := bufio.NewReader(conn)
     wstream := bufio.NewWriter(conn)
+    defer conn.Close()
 
     respond := func(resp string) bool {
         if _, err := wstream.WriteString(resp + "\r\n"); err != nil { return false }
@@ -191,14 +183,15 @@ func (self *SimpleMsger) handleClient(conn net.Conn) { // {{{1
         return true
     }
     respCh := make(chan string, 1)
-    defer conn.Close()
     if self.raftCh == nil {
         _, _ = wstream.WriteString("ERR503\r\n")
         return
     }
     for {
         // FIXME have a read deadline?
-        ce, eof := ParseCEntry(rstream)
+        line, err := ReadLineClean(rstream)
+        if err != nil { break }
+        ce := ParseCEntry(line)
         if ce != nil {
             self.cRespCh.insert(ce.UID, respCh)
             self.raftCh <- ce
@@ -210,10 +203,14 @@ func (self *SimpleMsger) handleClient(conn net.Conn) { // {{{1
                 self.cRespCh.remove(ce.UID)
             }
             if ok := respond(resp); !ok { break }
-        } else if !eof {
-            if ok := respond("ERR400"); !ok { break }
         } else {
-            break
+            if ok := respond("ERR400"); !ok { break }
         }
+    }
+}
+
+func (self *SimpleMsger) RespondToClient(uid uint64, msg string) { // {{{1
+    if respCh, ok := self.cRespCh.remove(uid); ok {
+        respCh <- msg // client timeout could happen in parallel
     }
 }

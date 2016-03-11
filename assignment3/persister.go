@@ -19,14 +19,14 @@ func (self *SimplePster) lastIdx() uint64 { // {{{1
     tailItem, _ := self.rlog.MaxItem(false)
     var tailIdx uint64 = NilIdx
     if tailItem != nil {
-        tailIdx = uint64(LogKeyDec(tailItem.Key))
+        tailIdx = uint64(U64Dec(tailItem.Key))
     }
     return tailIdx
 }
 
 // ---- quack like a Persister {{{1
 func (self *SimplePster) Entry(idx uint64) *raft.RaftEntry {
-    blob, _ := self.rlog.Get(LogKeyEnc(idx))
+    blob, _ := self.rlog.Get(U64Enc(idx))
     if blob == nil { return nil }
     entry, err := LogValDec(blob)
     if err != nil {
@@ -41,7 +41,7 @@ func (self *SimplePster) LastEntry() (uint64, *raft.RaftEntry) {
     if item == nil {
         return 0, nil
     }
-    idx := LogKeyDec(item.Key)
+    idx := U64Dec(item.Key)
     entry, err := LogValDec(item.Val)
     if err != nil {
         // panic?
@@ -69,7 +69,7 @@ func (self *SimplePster) LogSlice(startIdx uint64, endIdx uint64) ([]raft.RaftEn
     var idx = startIdx
     iter_cb := func(item *gkvlite.Item) bool {
         if idx >= endIdx { return false }
-        if idx != LogKeyDec(item.Key) { // sanity check
+        if idx != U64Dec(item.Key) { // sanity check
             panic("Corrupted log!")
         }
 
@@ -79,7 +79,7 @@ func (self *SimplePster) LogSlice(startIdx uint64, endIdx uint64) ([]raft.RaftEn
         idx += 1
         return true
     }
-    self.rlog.VisitItemsAscend(LogKeyEnc(startIdx), true, iter_cb)
+    self.rlog.VisitItemsAscend(U64Enc(startIdx), true, iter_cb)
     return entries, true
 }
 
@@ -93,7 +93,7 @@ func (self *SimplePster) LogUpdate(startIdx uint64, slice []raft.RaftEntry) bool
         if lastIdx != NilIdx { // truncate
             newTailIdx := startIdx + uint64(len(slice)) - 1
             for idx := lastIdx; idx > newTailIdx; idx -= 1 {
-                deleted, _ := self.rlog.Delete(LogKeyEnc(idx))
+                deleted, _ := self.rlog.Delete(U64Enc(idx))
                 if !deleted { panic("Corrupt log!") }
             }
         }
@@ -101,7 +101,7 @@ func (self *SimplePster) LogUpdate(startIdx uint64, slice []raft.RaftEntry) bool
         for _, entry := range slice { // append/update
             blob, err := LogValEnc(&entry)
             if err != nil { panic("Impossible encode error!!") }
-            err = self.rlog.Set(LogKeyEnc(idx), blob)
+            err = self.rlog.Set(U64Enc(idx), blob)
             if err != nil { return false } // panic??
             idx += 1
         }

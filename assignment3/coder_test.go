@@ -1,8 +1,6 @@
 package main
 
 import (
-    "bufio"
-    "bytes"
     "github.com/critiqjo/cs733/assignment3/raft"
     "reflect"
     "testing"
@@ -36,28 +34,22 @@ func TestCoding(t *testing.T) {
 }
 
 func TestParseCEntry(t *testing.T) {
-    buf := bytes.NewBuffer([]byte("update 0x543 345\r\nread 0x542\r\n"))
-    rstream := bufio.NewReader(buf)
-    centry, _ := ParseCEntry(rstream)
+    centry := ParseCEntry("update 0x543 345")
     if !reflect.DeepEqual(centry, &raft.ClientEntry { 0x543, &MachnUpdate { 345 } }) {
         t.Fatal("Bad write parsing!")
     }
-    centry, _ = ParseCEntry(rstream)
+    centry = ParseCEntry("read 0x542")
     if !reflect.DeepEqual(centry, &raft.ClientEntry { 0x542, &MachnRead {} }) {
         t.Fatal("Bad read parsing!")
     }
-    centry, eof := ParseCEntry(rstream)
-    if centry != nil || !eof {
-        t.Fatal("Bad ending!")
-    }
 }
 
-func TestLogKeyCoding(t *testing.T) {
-    blob := LogKeyEnc(2)
+func TestU64Coding(t *testing.T) {
+    blob := U64Enc(7)
     if len(blob) != 8 {
         t.Fatal("Bad length of encoded key!")
     }
-    if LogKeyDec(blob) != 2 {
+    if U64Dec(blob) != 7 {
         t.Fatal("Bad decoding of key!")
     }
 }

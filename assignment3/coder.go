@@ -1,7 +1,6 @@
 package main
 
 import (
-    "bufio"
     "bytes"
     "encoding/binary"
     "encoding/gob"
@@ -42,26 +41,20 @@ func InitCoder() {
 }
 
 // Tries to parse a ClientEntry from stream
-// if connection is closed (eof), then returns (nil, true)
-// else if parsing succeeds, then returns (<parsed entry>, false)
-// else returns (nil, false)
-func ParseCEntry(rstream *bufio.Reader) (*raft.ClientEntry, bool) {
-    str, err := rstream.ReadString('\n')
-    if err != nil { return nil, true }
-
+func ParseCEntry(str string) *raft.ClientEntry {
     var pat *regexp.Regexp
     var matches []string
-    pat = regexp.MustCompile("^read (0x[0-9a-f]+)\r\n$")
+    pat = regexp.MustCompile("^read (0x[0-9a-f]+)$")
     matches = pat.FindStringSubmatch(str)
     if len(matches) > 0 {
         uid, _ := strconv.ParseUint(matches[1], 0, 64)
         return &raft.ClientEntry {
             UID: uid,
             Data: &MachnRead {},
-        }, false
+        }
     }
 
-    pat = regexp.MustCompile("^update (0x[0-9a-f]+) ([0-9]+)\r\n$")
+    pat = regexp.MustCompile("^update (0x[0-9a-f]+) ([0-9]+)$")
     matches = pat.FindStringSubmatch(str)
     if len(matches) > 0 {
         uid, _ := strconv.ParseUint(matches[1], 0, 64)
@@ -69,10 +62,10 @@ func ParseCEntry(rstream *bufio.Reader) (*raft.ClientEntry, bool) {
         return &raft.ClientEntry {
             UID: uid,
             Data: &MachnUpdate { val },
-        }, false
+        }
     }
 
-    return nil, false
+    return nil
 }
 
 func binaryMustEnc(val interface{}, initCap int) []byte {
@@ -88,14 +81,14 @@ func binaryMustDec(blob []byte, val interface{}) {
     if err != nil { panic("Impossible decode error!") }
 }
 
-func LogKeyEnc(key uint64) []byte {
-    return binaryMustEnc(key, 8)
+func U64Enc(val uint64) []byte {
+    return binaryMustEnc(val, 8)
 }
 
-func LogKeyDec(blob []byte) uint64 {
-    key := new(uint64)
-    binaryMustDec(blob, key)
-    return *key
+func U64Dec(blob []byte) uint64 {
+    val := new(uint64)
+    binaryMustDec(blob, val)
+    return *val
 }
 
 func LogValEnc(entry *raft.RaftEntry) ([]byte, error) {
