@@ -168,9 +168,24 @@ func (self *RaftNode) isUpToDate(r *VoteRequest) bool {
     return r.LastLogTerm > lastEntry.Term || (r.LastLogTerm == lastEntry.Term && r.LastLogIdx >= lastIdx)
 }
 
-func (self *RaftNode) logAppend(startIdx uint64, entries []RaftEntry) {
+func (self *RaftNode) logUpdate(startIdx uint64, entries []RaftEntry) {
     if ok := self.pster.LogUpdate(startIdx, entries); !ok {
         self.err.Print("fatal: unable to update log; ignoring!!!")
+    }
+}
+
+func (self *RaftNode) leaderLogAppend(entry RaftEntry) {
+    lastIdx, _ := self.logTail()
+    newIdx := lastIdx + 1
+    self.logUpdate(newIdx, []RaftEntry { entry })
+    if entry.CEntry != nil {
+        self.idxOfUid[entry.CEntry.UID] = newIdx
+    }
+    for nodeId := range self.nextIdx {
+        nextIdx := self.nextIdx[nodeId]
+        if nextIdx == newIdx {
+            self.sendAppendEntries(nodeId, 1)
+        }
     }
 }
 
@@ -244,7 +259,7 @@ func (self *RaftNode) followerHandler(m Message) { // {{{1
             if prevIdx <= lastIdx && self.log(prevIdx).Term == msg.PrevLogTerm {
                 var lastModIdx uint64 = 0 // should be non-zero only for non-heartbeat
                 if len(msg.Entries) > 0 { // not heartbeat!
-                    self.logAppend(prevIdx + 1, msg.Entries)
+                    self.logUpdate(prevIdx + 1, msg.Entries)
                     lastModIdx, _ = self.logTail()
                 }
                 self.msger.Send(msg.LeaderId, &AppendReply {
@@ -277,9 +292,7 @@ func (self *RaftNode) followerHandler(m Message) { // {{{1
                 self.setTermAndVote(msg.Term, NilNode)
             }
 
-            if self.votedFor != NilNode {
-                self.msger.Send(msg.CandidId, &VoteReply { self.term, false, self.id })
-            } else if !self.isUpToDate(msg) {
+            if !self.isUpToDate(msg) || self.votedFor != NilNode {
                 self.msger.Send(msg.CandidId, &VoteReply { self.term, false, self.id })
             } else {
                 self.setVote(msg.CandidId)
@@ -361,6 +374,7 @@ func (self *RaftNode) candidateHandler(m Message) { // {{{1
                 }
                 self.state = Leader
                 self.leaderHandler(&timeout { 0 })
+                // optimize by replicating an empty log entry of current term?
             }
         } else if msg.Term > self.term {
             self.setTermAndVote(msg.Term, NilNode)
@@ -440,16 +454,7 @@ func (self *RaftNode) leaderHandler(m Message) { // {{{1
             }
             break
         }
-        lastIdx, _ := self.logTail()
-        newIdx := lastIdx + 1
-        self.logAppend(newIdx, []RaftEntry { RaftEntry { self.term, msg } })
-        self.idxOfUid[msg.UID] = newIdx
-        for nodeId := range self.nextIdx {
-            nextIdx := self.nextIdx[nodeId]
-            if nextIdx == newIdx {
-                self.sendAppendEntries(nodeId, 1)
-            }
-        }
+        self.leaderLogAppend(RaftEntry { self.term, msg })
 
     case *timeout:
         for _, nodeId := range self.peerIds {

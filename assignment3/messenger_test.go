@@ -48,7 +48,7 @@ func TestSimpleMsger(t *testing.T) { // {{{1
             raft.RaftEntry { 4, nil },
         }, 3,
     }
-    msger1.Send(2, apen)
+    msger1.Send(2, apen) // this might silently fail
     m := <-raftch2
     assert_eq(t, m, apen, "Message mismatch", m)
 
