@@ -130,7 +130,7 @@ func (self *SimplePster) Sync() bool {
     return err == nil
 }
 
-func NewPster(dbpath string) (*SimplePster, error) { // {{{1
+func NewPster(dbpath string, errlog *log.Logger) (*SimplePster, error) { // {{{1
     var store *gkvlite.Store
     file, err := os.OpenFile(dbpath, os.O_RDWR|os.O_CREATE|os.O_SYNC, 0660)
     if err != nil {
@@ -145,7 +145,7 @@ func NewPster(dbpath string) (*SimplePster, error) { // {{{1
         store:   store,
         rlog:    store.SetCollection("rlog", nil),
         rfields: store.SetCollection("rfields", nil),
-        err:     log.New(os.Stderr, "-- ", log.Lshortfile),
+        err:     errlog,
     }, nil
 }
 

@@ -3,7 +3,9 @@ package main
 import (
     "bufio"
     "github.com/critiqjo/cs733/assignment3/raft"
+    "log"
     "net"
+    "os"
     "reflect"
     "testing"
 )
@@ -20,7 +22,8 @@ func assert_eq(t *testing.T, x, y interface{}, args ...interface{}) {
 
 func initMsger(t *testing.T, cluster map[uint32]Node, nodeId uint32) (*SimpleMsger, chan raft.Message) {
     raftch := make(chan raft.Message)
-    msger, err := NewMsger(nodeId, cluster)
+    errlog := log.New(os.Stderr, "-- ", log.Lshortfile)
+    msger, err := NewMsger(nodeId, cluster, errlog)
     if err != nil { t.Fatal("Creating messenger failed:", err) }
     msger.Register(raftch)
     msger.SpawnListeners()

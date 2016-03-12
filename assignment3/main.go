@@ -4,6 +4,7 @@ import (
     "encoding/json"
     "fmt"
     "github.com/critiqjo/cs733/assignment3/raft"
+    "log"
     "math/rand"
     "strconv"
     "os"
@@ -50,20 +51,21 @@ func main() {
     }
 
     logfile := args[2]
+    errlog := log.New(os.Stderr, "-- ", log.Lshortfile) // | log.Lmicroseconds
 
-    msger, err := NewMsger(uint32(selfId), cluster)
+    msger, err := NewMsger(uint32(selfId), cluster, errlog)
     if err != nil {
         fmt.Printf("Error creating messenger: %v\n", err.Error())
         os.Exit(1)
     }
-    pster, err := NewPster(logfile)
+    pster, err := NewPster(logfile, errlog)
     if err != nil {
         fmt.Printf("Error creating persister: %v\n", err.Error())
         os.Exit(1)
     }
     machn := NewMachn(0, msger)
 
-    node, err := raft.NewNode(uint32(selfId), nodeIds, 16, msger, pster, machn)
+    node, err := raft.NewNode(uint32(selfId), nodeIds, 16, msger, pster, machn, errlog)
     if err != nil {
         fmt.Printf("Error creating raft node: %v\n", err.Error())
         os.Exit(1)

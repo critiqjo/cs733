@@ -2,12 +2,15 @@ package main
 
 import (
     "github.com/critiqjo/cs733/assignment3/raft"
+    "log"
+    "os"
     "reflect"
     "testing"
 )
 
 func initPster(t *testing.T, dbpath string) *SimplePster {
-    pster, err := NewPster(dbpath)
+    errlog := log.New(os.Stderr, "-- ", log.Lshortfile)
+    pster, err := NewPster(dbpath, errlog)
     if err != nil { t.Fatal("Creating persister failed:", err) }
     return pster
 }

@@ -7,7 +7,6 @@ import (
     "log"
     "github.com/critiqjo/cs733/assignment3/raft"
     "net"
-    "os"
     "sync"
     "time"
 )
@@ -53,7 +52,7 @@ type Node struct { // {{{1
     CPort   int     `json:"client-port"`
 }
 
-func NewMsger(nodeId uint32, cluster map[uint32]Node) (*SimpleMsger, error) { // {{{1
+func NewMsger(nodeId uint32, cluster map[uint32]Node, errlog *log.Logger) (*SimpleMsger, error) { // {{{1
     node, ok := cluster[nodeId]
     if !ok { return nil, errors.New("nodeId not in cluster") }
     listenAddr := fmt.Sprintf("%v:%v", node.Host, node.PPort)
@@ -87,7 +86,7 @@ func NewMsger(nodeId uint32, cluster map[uint32]Node) (*SimpleMsger, error) { //
         cListen: cconn,
         cRespCh: newCRespChanMap(),
         cRespTO: 30 * time.Second,
-        err:     log.New(os.Stderr, "-- ", log.Lshortfile),
+        err:     errlog,
     }, nil
 }
 

@@ -3,7 +3,6 @@ package raft
 import (
     "errors"
     golog "log" // avoid confusion
-    "os"
     "sort"
     "time"
 )
@@ -40,6 +39,7 @@ type RaftNode struct { // FIXME organize differently?
 func NewNode( // {{{1
     selfId uint32, nodeIds []uint32, notifbuf int,
     msger Messenger, pster Persister, machn Machine,
+    errlog *golog.Logger,
 ) (*RaftNode, error) {
     rf := pster.GetFields()
     var peerIds []uint32
@@ -93,7 +93,7 @@ func NewNode( // {{{1
         msger: msger,
         pster: pster,
         machn: machn,
-        err: golog.New(os.Stderr, "-- ", golog.Lshortfile),
+        err: errlog,
     }, nil
 }
 

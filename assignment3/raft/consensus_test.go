@@ -1,8 +1,12 @@
 package raft
 
-import "testing"
-import "time"
-import "reflect"
+import (
+    golog "log"
+    "os"
+    "reflect"
+    "testing"
+    "time"
+)
 
 // TODO test with even number of nodes
 
@@ -89,7 +93,9 @@ func initTest() (*RaftNode, *DummyMsger, *DummyPster, *DummyMachn) {
     // Note: Deadlocking due to unbuffered channels is considered a bug!
     msger := &DummyMsger{ nil, make(chan interface{}) } // unbuffered channel
     pster, machn := &DummyPster{}, &DummyMachn{ make(map[uint64]bool) }
-    raft, err := NewNode(0, []uint32 { 0, 1, 2, 3, 4 }, 0, msger, pster, machn) // unbuffered channel
+    errlog := golog.New(os.Stderr, "-- ", golog.Lshortfile)
+    raft, err := NewNode(0, []uint32 { 0, 1, 2, 3, 4 }, 0, // unbuffered channel
+                         msger, pster, machn, errlog)
     if err != nil { panic(err) }
     go raft.Run(func(rs RaftState) time.Duration {
         return time.Duration(400) * time.Millisecond
