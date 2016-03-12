@@ -3,6 +3,7 @@ package main
 import (
     "github.com/critiqjo/cs733/assignment3/raft"
     "github.com/steveyen/gkvlite"
+    "log"
     "os"
 )
 
@@ -13,6 +14,7 @@ type SimplePster struct {
     store   *gkvlite.Store
     rlog    *gkvlite.Collection
     rfields *gkvlite.Collection
+    err     *log.Logger
 }
 
 func (self *SimplePster) lastIdx() uint64 { // {{{1
@@ -30,8 +32,8 @@ func (self *SimplePster) Entry(idx uint64) *raft.RaftEntry {
     if blob == nil { return nil }
     entry, err := LogValDec(blob)
     if err != nil {
-        // panic?
-        return nil
+        self.err.Print(err.Error())
+        return nil // panic?
     }
     return entry
 }
@@ -44,8 +46,8 @@ func (self *SimplePster) LastEntry() (uint64, *raft.RaftEntry) {
     idx := U64Dec(item.Key)
     entry, err := LogValDec(item.Val)
     if err != nil {
-        // panic?
-        return 0, nil
+        self.err.Print(err.Error())
+        return 0, nil // panic?
     }
     return idx, entry
 }
@@ -105,8 +107,7 @@ func (self *SimplePster) LogUpdate(startIdx uint64, slice []raft.RaftEntry) bool
             if err != nil { return false } // panic??
             idx += 1
         }
-        err := self.store.Flush()
-        return err == nil
+        return self.Sync()
     }
     return false
 }
@@ -120,7 +121,12 @@ func (self *SimplePster) GetFields() *raft.RaftFields {
 func (self *SimplePster) SetFields(fields raft.RaftFields) bool {
     err := self.rfields.Set([]byte {0}, FieldsEnc(&fields))
     if err != nil { return false }
-    err = self.store.Flush()
+    return self.Sync()
+}
+
+func (self *SimplePster) Sync() bool {
+    err := self.store.Flush()
+    // No need to file.Sync() due to O_SYNC
     return err == nil
 }
 
@@ -135,10 +141,11 @@ func NewPster(dbpath string) (*SimplePster, error) { // {{{1
         return nil, err
     }
     return &SimplePster {
-        file: file,
-        store: store,
-        rlog: store.SetCollection("rlog", nil),
+        file:    file,
+        store:   store,
+        rlog:    store.SetCollection("rlog", nil),
         rfields: store.SetCollection("rfields", nil),
+        err:     log.New(os.Stderr, "-- ", log.Lshortfile),
     }, nil
 }
 

@@ -153,6 +153,7 @@ func (self *SimpleMsger) handlePeer(conn net.Conn) {
             break
         }
         msg, err := MsgDec(data)
+        //self.err.Print("Received ", msg)
         if err == nil {
             self.raftCh <- msg
         } else {

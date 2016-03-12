@@ -11,6 +11,8 @@ import (
 )
 
 func main() {
+    InitCoder()
+
     args := os.Args
     if len(args) != 4 {
         fmt.Printf("Usage: %v <cluster-file> <log-file> <node-id>\n", args[0])
@@ -68,8 +70,6 @@ func main() {
         fmt.Printf("Error creating raft node: %v\n", err.Error())
         os.Exit(1)
     }
-
-    InitCoder()
 
     msger.SpawnListeners()
     node.Run(func(state raft.RaftState) time.Duration {
