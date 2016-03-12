@@ -97,7 +97,7 @@ func initTest() (*RaftNode, *DummyMsger, *DummyPster, *DummyMachn) {
     raft, err := NewNode(0, []uint32 { 0, 1, 2, 3, 4 }, 0, // unbuffered channel
                          msger, pster, machn, errlog)
     if err != nil { panic(err) }
-    go raft.Run(func(rs RaftState) time.Duration {
+    go raft.RunEx(func(rs RaftState) time.Duration {
         return time.Duration(400) * time.Millisecond
     })
     return raft, msger, pster, machn

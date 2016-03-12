@@ -3,6 +3,7 @@ package raft
 import (
     "errors"
     golog "log" // avoid confusion
+    "math/rand"
     "sort"
     "time"
 )
@@ -97,8 +98,26 @@ func NewNode( // {{{1
     }, nil
 }
 
-// Run the event loop, waits for messages and timeouts
-func (self *RaftNode) Run(timeoutSampler func(RaftState) time.Duration) { // {{{1
+// Run the event loop with default timeout logic
+func (self *RaftNode) Run(timeoutBase time.Duration) { // {{{1
+    followMinTO := 2 * timeoutBase
+    candidMinTO := 3 * timeoutBase
+    fuzz := int64(2 * timeoutBase)
+    self.RunEx(func(state RaftState) time.Duration {
+        switch state {
+        case Follower:
+            return followMinTO + time.Duration(rand.Int63n(fuzz))
+        case Candidate:
+            return candidMinTO + time.Duration(rand.Int63n(fuzz))
+        case Leader:
+            return timeoutBase
+        }
+        panic("Unreachable")
+    })
+}
+
+// Run the event loop with custom timout sampling
+func (self *RaftNode) RunEx(timeoutSampler func(RaftState) time.Duration) { // {{{1
     self.timer = NewRaftTimer(func(v uint64) func() {
         return func() {
             self.notifch <- &timeout { v }

@@ -5,7 +5,6 @@ import (
     "fmt"
     "github.com/critiqjo/cs733/assignment3/raft"
     "log"
-    "math/rand"
     "strconv"
     "os"
     "time"
@@ -72,15 +71,5 @@ func main() {
     }
 
     msger.SpawnListeners()
-    node.Run(func(state raft.RaftState) time.Duration {
-        switch state {
-        case raft.Follower:
-            return time.Duration(400 + rand.Int63n(400)) * time.Millisecond
-        case raft.Candidate:
-            return time.Duration(600 + rand.Int63n(400)) * time.Millisecond
-        case raft.Leader:
-            return time.Duration(200) * time.Millisecond
-        }
-        panic("Unreachable")
-    })
+    node.Run(time.Duration(200) * time.Millisecond)
 }
