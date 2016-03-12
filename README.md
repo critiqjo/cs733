@@ -14,3 +14,8 @@ found in the [project directory](./assignment1).
 A basic implementation of Raft protocol with the communication layer and state
 machine layer abstracted out. More on design can be found in the [project
 README](./assignment2/README.md).
+
+### Assignment 3: Raft Deployment
+
+A simple distributed application on top of Raft layer. More details in the
+[project directory](./assignment3).
