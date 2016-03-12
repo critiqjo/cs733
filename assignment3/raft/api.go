@@ -8,8 +8,8 @@ const (
     Leader
 )
 
-// reserved node id (internally used to indicate that no vote was cast)
-// if this value is found while calling NewNode(), it returns an error
+// Reserved node id (internally used to indicate that no vote was cast)
+// If this value is found while calling NewNode(), it returns an error.
 const NilNode uint32 = ^uint32(0)
 
 type RaftEntry struct {
@@ -18,7 +18,6 @@ type RaftEntry struct {
 }
 
 type Message interface {}
-// either of the 5 structs below
 
 type AppendEntries struct {
     Term uint64
@@ -56,14 +55,21 @@ type VoteReply struct {
 
 // Must maintain a map from serverIds to (network) address/socket
 type Messenger interface {
+    // the channel through which Raft layer should be notified of new Messages
     Register(notifch chan<- Message)
+
     Send(node uint32, msg Message)
     BroadcastVoteRequest(msg *VoteRequest)
-    Client301(uid uint64, node uint32) // redirect to another node (possibly the leader)
-    Client503(uid uint64) // service temporarily unavailable
+
+    // redirect to another node (possibly the leader)
+    Client301(uid uint64, node uint32)
+
+    // service temporarily unavailable (leader unknown)
+    Client503(uid uint64)
 }
 
-type Persister interface { // caching of log could be done by the implementer
+// Caching of log could be done by the implementer
+type Persister interface {
     Entry(idx uint64) *RaftEntry // return nil if out of bounds
 
     // if log is empty, return (0, nil); otherwise, return (last log index, last log entry)
@@ -79,7 +85,10 @@ type Persister interface { // caching of log could be done by the implementer
     // Append log entries (possibly after truncating the log from startIdx)
     LogUpdate(startIdx uint64, slice []RaftEntry) bool
 
-    GetFields() *RaftFields // return nil if no record
+    // Should return nil if no record
+    GetFields() *RaftFields
+
+    // Return whether it was successfully persisted
     SetFields(RaftFields) bool
 }
 
@@ -89,16 +98,15 @@ type RaftFields struct {
     // configuration details?
 }
 
-// should be internally linked with the Messenger object to respond to clients
 type Machine interface {
     // If the request with uid has been processed or queued, then return true
     // (so that the newly arrive request can be ignored, otherwise the request
-    // will be replicated), and respond to the client appropriately
+    // will be replicated and applied), and respond to the client appropriately
     TryRespond(uid uint64) bool
 
-    // Execute commands (lazily), and respond to clients with results. After
-    // this call returns, TryRespond should return true for all of these uids
-    // regardless of whether the operation has been applied or it is still in
+    // Execute commands (possibly lazily), and respond to clients with results.
+    // After this call returns, TryRespond should return true for all of these
+    // uids regardless of whether the operation has been applied or is still in
     // the lazy queue.
     Execute([]ClientEntry)
 
