@@ -59,7 +59,7 @@ func WriteHard(conn net.Conn, blob []byte) error { // {{{1
     for nn < len(blob) {
         n, err := conn.Write(blob[nn:])
         if nerr, ok := err.(net.Error); ok && nerr.Temporary() {
-            time.Sleep(100 * time.Millisecond)
+            time.Sleep(50 * time.Millisecond)
             nn += n
             continue
         } else {
