@@ -9,10 +9,6 @@ import (
 )
 
 // ---- utility functions {{{1
-func init() {
-    InitCoder()
-}
-
 func assert(t *testing.T, e bool, args ...interface{}) {
     // Unidiomatic: https://golang.org/doc/faq#testing_framework
     if !e { t.Fatal(args...) }

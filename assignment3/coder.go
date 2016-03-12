@@ -9,6 +9,16 @@ import (
     "strconv"
 )
 
+func init() {
+    gob.RegisterName("AE", new(raft.AppendEntries))
+    gob.RegisterName("AP", new(raft.AppendReply))
+    gob.RegisterName("CE", new(raft.ClientEntry))
+    gob.RegisterName("VQ", new(raft.VoteRequest))
+    gob.RegisterName("VP", new(raft.VoteReply))
+    gob.RegisterName("MR", new(MachnRead))
+    gob.RegisterName("MU", new(MachnUpdate))
+}
+
 type happyWrap struct { // make gob happy! Is there an easier way?
     Smile interface{}
 }
@@ -27,17 +37,6 @@ func MsgDec(blob []byte) (raft.Message, error) {
     err := dec.Decode(happy)
     if err != nil { return nil, err }
     return happy.Smile, nil
-}
-
-// This should be called once to Register types with gob
-func InitCoder() {
-    gob.RegisterName("AE", new(raft.AppendEntries))
-    gob.RegisterName("AP", new(raft.AppendReply))
-    gob.RegisterName("CE", new(raft.ClientEntry))
-    gob.RegisterName("VQ", new(raft.VoteRequest))
-    gob.RegisterName("VP", new(raft.VoteReply))
-    gob.RegisterName("MR", new(MachnRead))
-    gob.RegisterName("MU", new(MachnUpdate))
 }
 
 // Tries to parse a ClientEntry from stream

@@ -6,10 +6,6 @@ import (
     "testing"
 )
 
-func init() {
-    InitCoder()
-}
-
 func TestCoding(t *testing.T) {
     testMsg := func(msg raft.Message) {
         blob, err := MsgEnc(msg)

@@ -345,6 +345,9 @@ func (self *RaftNode) candidateHandler(m Message) { // {{{1
                 self.idxOfUid = make(map[uint64]uint64)
                 for idx := self.lastAppld + 1; idx <= lastIdx; idx += 1 {
                     // fill idxOfUid with unapplied requests
+                    // FIXME since commitIdx is volatile, the first leader
+                    //       after a whole-cluster failure will have to read
+                    //       the entire log to make this map
                     entry := self.log(idx)
                     if entry.CEntry != nil {
                         self.idxOfUid[entry.CEntry.UID] = idx
@@ -360,7 +363,6 @@ func (self *RaftNode) candidateHandler(m Message) { // {{{1
                 self.leaderHandler(&timeout { 0 })
             }
         } else if msg.Term > self.term {
-            self.err.Print("fatal: unsound vote reply; ignoring!!!")
             self.setTermAndVote(msg.Term, NilNode)
             self.state = Follower
         }

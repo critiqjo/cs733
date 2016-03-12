@@ -11,8 +11,6 @@ import (
 )
 
 func main() {
-    InitCoder()
-
     args := os.Args
     if len(args) != 4 {
         fmt.Printf("Usage: %v <cluster-file> <log-file> <node-id>\n", args[0])

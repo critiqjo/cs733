@@ -135,7 +135,7 @@ func (self *SimpleMsger) listenToPeers() {
     for {
         conn, err := self.pListen.Accept()
         if err != nil {
-            self.err.Print("Fatal error:", err)
+            self.err.Print("Fatal: ", err)
             break
         }
         go self.handlePeer(conn)
@@ -149,7 +149,7 @@ func (self *SimpleMsger) handlePeer(conn net.Conn) {
     for {
         data, err := RecvBlob(rstream)
         if err != nil {
-            self.err.Print("Fatal error:", err)
+            self.err.Print("Peer error: ", err)
             break
         }
         msg, err := MsgDec(data)
@@ -166,7 +166,7 @@ func (self *SimpleMsger) listenToClients() {
     for {
         conn, err := self.cListen.Accept()
         if err != nil {
-            self.err.Print("Fatal error:", err)
+            self.err.Print("Fatal: ", err)
             break
         }
         go self.handleClient(conn)
@@ -175,19 +175,17 @@ func (self *SimpleMsger) listenToClients() {
 
 func (self *SimpleMsger) handleClient(conn net.Conn) { // {{{1
     rstream := bufio.NewReader(conn)
-    wstream := bufio.NewWriter(conn)
     defer conn.Close()
 
     respond := func(resp string) bool {
-        if _, err := wstream.WriteString(resp + "\r\n"); err != nil { return false }
-        if    err := wstream.Flush();                    err != nil { return false }
-        return true
+        err := WriteHard(conn, []byte(resp + "\r\n"))
+        return err == nil
     }
-    respCh := make(chan string, 1)
     if self.raftCh == nil {
-        _, _ = wstream.WriteString("ERR503\r\n")
+        _ = respond("ERR503")
         return
     }
+    respCh := make(chan string, 1)
     for {
         // FIXME have a read deadline?
         line, err := ReadLineClean(rstream)
