@@ -8,6 +8,7 @@ import (
     "os"
     "reflect"
     "testing"
+    "time"
 )
 
 // ---- utility functions {{{1
@@ -41,6 +42,7 @@ func TestSimpleMsger(t *testing.T) { // {{{1
     msger2, raftch2 := initMsger(t, cluster, 2)
     msger3, raftch3 := initMsger(t, cluster, 3)
 
+    var m raft.Message
     apen := &raft.AppendEntries {
         4, 2, 0, 0, []raft.RaftEntry {
             raft.RaftEntry { 1, nil },
@@ -48,8 +50,15 @@ func TestSimpleMsger(t *testing.T) { // {{{1
             raft.RaftEntry { 4, nil },
         }, 3,
     }
-    msger1.Send(2, apen) // this might silently fail
-    m := <-raftch2
+    loop:
+    for {
+        msger1.Send(2, apen) // this might silently fail, so retry!
+        select {
+        case m = <-raftch2:
+            break loop
+        case <-time.After(200 * time.Millisecond):
+        }
+    }
     assert_eq(t, m, apen, "Message mismatch", m)
 
     vreq := &raft.VoteRequest { 7, 1, 8, 7 }
