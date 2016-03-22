@@ -17,5 +17,8 @@ README](./assignment2/README.md).
 
 ### Assignment 3: Raft Deployment
 
+[![Build Status](https://travis-ci.org/critiqjo/cs733.svg?branch=master)](https://travis-ci.org/critiqjo/cs733)
+[![Coverage Status](https://coveralls.io/repos/github/critiqjo/cs733/badge.svg?branch=master)](https://coveralls.io/github/critiqjo/cs733?branch=master)
+
 A simple distributed application on top of Raft layer. More details in the
 [project directory](./assignment3).
