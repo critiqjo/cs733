@@ -321,10 +321,8 @@ func (self *RaftNode) followerHandler(m Message) { // {{{1
         }
 
     case *AppendReply:
-        break
 
     case *VoteReply:
-        break
 
     case *ClientEntry:
         if self.votedFor != NilNode {
@@ -366,7 +364,6 @@ func (self *RaftNode) candidateHandler(m Message) { // {{{1
         }
 
     case *AppendReply:
-        break
 
     case *VoteReply:
         if msg.Term == self.term && msg.Granted {
@@ -460,7 +457,6 @@ func (self *RaftNode) leaderHandler(m Message) { // {{{1
         } // else outdated message?
 
     case *VoteReply:
-        break
 
     case *ClientEntry:
         if self.machn.TryRespond(msg.UID) {
