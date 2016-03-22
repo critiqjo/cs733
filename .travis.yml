@@ -2,14 +2,14 @@ language: go
 
 go:
   - 1.6
-  - tip
+  - 1.5
 
 env:
   global:
     secure: cZGcDNcMzicNNm/MvweqUEg2dej1UzZ5kdsTcMuW8IZwWAnLkE0PmseC1N0N/0ya7NXBIiFKty8mroDG7WUTMEo4fHlTmmPCL84vySzhUWAF2d+3ZCJazfJUmd/8FDDuVY0gC2oME6jXQCMVoUKbq4F37dKq9Miv+NmkVI5cchPMZjQPXm3Sg8xXYf/aJHY29eFCsm6OXYolnK+GYBP7lB9s49skW12DzfgfJClE63Jrd7VH9yONIihS1VuErw2PJffL9s7wvJqkRA4MedGwtVnTc4wXQPIAFFP4FfAd+bcrYPHUqOOG19GpDMpHOf6/UqKHEJAQoyY9BWXRXcWiiKY8r+Z08/TbA6pbAn/q4IGY1rEozR2Utm9eJqi5nTz1/6dWGsYHLCHp2jNCV6/cgp5Axj0JH5UnLO8RYr9cSRpnDTfe9KWrayrtrgfDM1x3Yicgz08fxeO9yEjTwbvytWf0MMbGZB80OEoIcWiFzUq3lUUZDhTGiGpYnNiw6S/ugQqvEAh+TyVLp5ztDcXz+Jq1kn4Wx9NYtVznPn5DFoHBPs2knTQ4BEVgVoy94jFZ/8wiX3sbxIdbAk60lAziCQSlexrUWdFo3skqOO3a+i4HYVUXqEp0kSH9/YaD5gg6Iuey2Y2YGMsXJs0MkDZMTWPk07cJKn7LLJzWQsE6hDI=
 
 install:
-  - go get ./assignment3/...
+  - go get -t ./assignment3/...
   - go get golang.org/x/tools/cmd/cover
   - go get github.com/mattn/goveralls
   - go get github.com/wadey/gocovmerge
