@@ -1,17 +1,22 @@
 # Distributed Versioned File Store
 
-A distributed, versioned, in-memory file store with persistent log. The server
-listens for TCP connections on port 8080. The communication protocol is given
-below. Fields in header lines (in both requests and responses) are single-space
-(ASCII `0x20`) separated, without leading or trailing spaces; square brackets
-indicate optional fields.
+A distributed, versioned, in-memory file store with persistent log.
+
+Running the server is the same as in [Assignment 3](../assignment3):
+```
+sh$ ./assignment4 <cluster-json> <log-file> <server-id>
+```
+
+The communication protocol is given below. Fields in header lines (in both
+requests and responses) are single-space (ASCII `0x20`) separated, without
+leading or trailing spaces; square brackets indicate optional fields.
 
 ### Protocol
 
 * Read a file by name:
 
   ```
-  read <filename>\r\n
+  read <uid> <filename>\r\n
   ```
   Response on success:
   ```
@@ -21,7 +26,7 @@ indicate optional fields.
 * Create (or overwrite) a file:
 
   ```
-  write <filename> <size>[ <time2exp>]\r\n<content>\r\n
+  write <uid> <filename> <size>[ <time2exp>]\r\n<content>\r\n
   ```
   Response on success:
   ```
@@ -31,7 +36,7 @@ indicate optional fields.
 * Delete a file:
 
   ```
-  delete <filename>\r\n
+  delete <uid> <filename>\r\n
   ```
   Response on success (if exists):
   ```
@@ -41,7 +46,7 @@ indicate optional fields.
 * Overwrite the contents if versions match:
 
   ```
-  cas <filename> <version> <size>[ <time2exp>]\r\n<content>\r\n
+  cas <uid> <filename> <version> <size>[ <time2exp>]\r\n<content>\r\n
   ```
   Response on success:
   ```
@@ -50,6 +55,9 @@ indicate optional fields.
 
 #### Fields
 
+* `<uid>`: A 64-bit `0x`-prefixed hexadecimal number which uniquely identifies
+  the request. A new request with the same UID will most likely return the
+  cached response.
 * `<filename>`: An ASCII string without any whitespace characters `[ \r\n\t]`
 * `<size>`: Size of `<content>` in number of bytes (base-10 formatted)
 * `<version>`: A 64-bit integer greater than zero (base-10 formatted)
