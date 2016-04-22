@@ -1,0 +1,5 @@
+{
+    "1": { "host-ip": "127.0.0.1", "peer-port": 5010, "client-port": 5011 },
+    "2": { "host-ip": "127.0.0.1", "peer-port": 5020, "client-port": 5021 },
+    "3": { "host-ip": "127.0.0.1", "peer-port": 5030, "client-port": 5031 }
+}
