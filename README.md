@@ -22,3 +22,8 @@ README](./assignment2/README.md).
 
 A simple distributed application on top of Raft layer. More details in the
 [project directory](./assignment3).
+
+### Assignment 4=3+1: Distributed Versioned File Store
+
+More details in the [project directory](./assignment4). Incomplete, and not
+neatly done due to time constraints!
