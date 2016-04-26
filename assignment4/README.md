@@ -72,24 +72,24 @@ leading or trailing spaces; square brackets indicate optional fields.
 * `ERR301 <current-leader>\r\n`: Redirect request
 * `ERR400 Bad request\r\n`: Bad formatting
 * `ERR404 File not found\r\n`
-* `ERR503 Service unavailable\r\n`
-* `ERR504 Service timed out\r\n`
+* `ERR503 Service unavailable\r\n`: "Unknown leader" or "server not ready"
+* `ERR504 Service timed out\r\n`: Probably means that replication failed
 
 ### Points of note
 
+* Expiration time does not work correctly. When a server restarts, and the log
+  is replayed, _all_ the files become active and expiration timers are
+  recreated! This is because the log entries contain user requests as such
+  (with expiration duration, not timestamp). Fixing it is too much hassle!
 * When a file is created, a 32-bit random positive integer is used as its
   initial version.
 * Versions are incremented by one on each update (do not rely on this).
 * The server maintains only the latest version of a file.
 * When a file is expired, the file is deleted, and the version count is lost.
 * When the server receives an invalid (badly formatted) request, it writes back
-  `ERR_CMD_ERR\r\n`, and closes the connection.
+  `ERR400 ...`, and _closes the connection_.
 * For `read`, the returned `<time2exp>` is `ceil` of the time to expire in
   seconds (so that `0` is only ever returned if the file has no expiration).
 * For `cas`, providing a version `0` means "only create" (file must not exist).
 * The server should be immune to changes of system time in Linux systems, thanks
   to [`CLOCK_MONOTONIC`](https://github.com/davecheney/junk/tree/master/clock).
-* The server does not provide any hard upper-bounds on when an expired file
-  will become inaccessible. The expiration time will not be in-sync across the
-  cluster. Therefore, an expired file in the current leader might be readable
-  from another machine if the planets line-up.
